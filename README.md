@@ -6,6 +6,10 @@ A high-speed, high-precision Mandelbrot set accelerator
 
 [![](img/youtube_thumb0.png)](https://youtu.be/rN9VtHJ6S8I)
 
+## Algorithm
+
+![](img/algorithm.png)
+
 ## Block Diagram
 
 ![](img/block_diagram.png)
