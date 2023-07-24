@@ -2,6 +2,8 @@
 
 A high-speed, high-precision Mandelbrot set accelerator
 
+## Video (YouTube)
+
 [![](img/youtube_thumb0.png)](https://youtu.be/rN9VtHJ6S8I)
 
 ## Interface
