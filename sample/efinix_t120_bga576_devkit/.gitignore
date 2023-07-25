@@ -1,0 +1,5 @@
+ip/
+outflow/
+work_*/
+.lock
+*.vdb
