@@ -6,11 +6,12 @@
 
 ## FT232H Pin Assign
 
-|J14 Pin Number|HDL Port Name|FPGA Pin Name|
-|:--:|:--:|:--:|
-|1|spi_cs_n|GPIOB_RXN26|
-|2|spi_sck|GPIOB_RXP27|
-|3|spi_mosi|GPIOB_RXN27|
-|4|spi_miso|GPIOB_RXP28|
+|J14 Pin Number|FT232HL Pin Name|FPGA Pin Name|HDL Port Name|
+|:--:|:--:|:--:|:--:|
+|1|ADBUS3|GPIOB_RXN26|spi_cs_n|
+|2|ADBUS0|GPIOB_RXP27|spi_sck|
+|3|ADBUS1|GPIOB_RXN27|spi_mosi|
+|4|ADBUS2|GPIOB_RXP28|spi_miso|
+|5 / 11|GND|GND|-|
 
 ----
