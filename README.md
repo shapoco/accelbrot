@@ -2,9 +2,14 @@
 
 A high-speed, high-precision Mandelbrot set accelerator
 
-## Video (YouTube)
+## Video
+
+This 4:40 video was created by generating 230 Full-HD images using FPGA and interpolating them using OpenCV.
 
 [![](img/youtube_thumb0.png)](https://youtu.be/rN9VtHJ6S8I)
+
+- YouTube : [Mandelbrot Zoom (FPGA Accelerated)](https://youtu.be/rN9VtHJ6S8I)
+- ニコニコ動画 : [FPGAでマンデルブロ集合ズーム動画を作ってみた](https://www.nicovideo.jp/watch/sm42516023)
 
 ## Algorithm
 
