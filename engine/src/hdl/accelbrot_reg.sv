@@ -167,12 +167,20 @@ assign ctl_rect_value   = r_ctl_rect_value  ;
 assign ctl_cmd_flags    = r_ctl_cmd_flags   ;
 assign ctl_rdque_rdptr  = r_ctl_rdque_rdptr ;
 
-logic[63:0] r_clk_cntr;
+logic[31:0] r_clk_cntr_l;
+logic[31:0] r_clk_cntr_h;
+logic r_clk_cntr_carry;
 always_ff @(posedge clk) begin
     if (!rstn) begin
-        r_clk_cntr <= '0;
+        r_clk_cntr_l <= '0;
+        r_clk_cntr_h <= '0;
+        r_clk_cntr_carry <= '0;
     end else begin
-        r_clk_cntr <= r_clk_cntr + 'd1;
+        r_clk_cntr_l <= r_clk_cntr_l + 'd1;
+        r_clk_cntr_carry <= (r_clk_cntr_l == 32'hfffffffe);
+        if (r_clk_cntr_carry) begin
+            r_clk_cntr_h <= r_clk_cntr_h + 'd1;
+        end
     end
 end
 
@@ -241,7 +249,7 @@ always_ff @(posedge clk) begin
             r_sts_total_exited  <= sts_total_exited ;
             r_sts_max_iter      <= sts_max_iter     ;
             r_sts_total_iter    <= sts_total_iter   ;
-            r_sts_clk_cntr      <= r_clk_cntr       ;
+            r_sts_clk_cntr      <= {r_clk_cntr_h, r_clk_cntr_l};
             r_sts_wram_wrbytes  <= v_wram_wrbytes   ;
             r_sts_wram_rdbytes  <= v_wram_rdbytes   ;
             v_wram_wrbytes = 0;

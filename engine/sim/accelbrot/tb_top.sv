@@ -479,6 +479,7 @@ initial begin
         reg_rd(STS_BUSY, busy, 0);
     end while (busy);
     show_stats();
+    show_stats();
     if (USE_READ_QUEUE) pop_queue();
 
     $display("----------------------------------------------------------------");
