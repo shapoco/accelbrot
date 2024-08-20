@@ -47,7 +47,12 @@ module accelbrot #(
     input   wire                    wram_wready         ,
     input   wire[1:0]               wram_bresp          ,
     input   wire                    wram_bvalid         ,
-    output  wire                    wram_bready
+    output  wire                    wram_bready         ,
+    output  wire                    mon_busy            ,
+    output  wire[31:0]              mon_num_active      ,
+    output  wire                    mon_loop_enter      ,
+    output  wire                    mon_loop_exit       ,
+    output  wire                    mon_rdque_full
 );
 
 localparam int RST_WIDTH = 10;
@@ -269,7 +274,8 @@ accelbrot_fsm #(
     .wram_wready        (wram_wready        ), // input
     .wram_bresp         (wram_bresp         ), // input [1:0]
     .wram_bvalid        (wram_bvalid        ), // input
-    .wram_bready        (wram_bready        )  // output
+    .wram_bready        (wram_bready        ), // output
+    .mon_rdque_full     (mon_rdque_full     )  // output
 );
 
 wire[WWIDTH-1:0]w_enter_a       ;
@@ -329,6 +335,28 @@ accelbrot_loop #(
     .exit_valid     (w_exit_valid       ), // output
     .exit_ready     (w_exit_ready       )  // input
 );
+
+logic       r_mon_busy;
+logic[31:0] r_mon_num_active;
+logic       r_mon_loop_enter;
+logic       r_mon_loop_exit;
+always_ff @(posedge clk) begin
+    if (!rstn) begin
+        r_mon_busy <= '0;
+        r_mon_num_active <= '0;
+        r_mon_loop_enter <= '0;
+        r_mon_loop_exit <= '0;
+    end else begin
+        r_mon_busy <= w_sts_busy;
+        r_mon_num_active <= w_sts_num_active;
+        r_mon_loop_enter <= w_push_valid & w_push_ready;
+        r_mon_loop_exit <= w_exit_valid & w_exit_ready;
+    end
+end
+assign mon_busy = r_mon_busy;
+assign mon_num_active = r_mon_num_active;
+assign mon_loop_enter = r_mon_loop_enter;
+assign mon_loop_exit = r_mon_loop_exit;
 
 endmodule
 

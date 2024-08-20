@@ -121,6 +121,11 @@ wire                    wram_wready ; // output
 wire                    wram_bvalid ; // output
 wire                    wram_bready ; // input
 wire[1:0]               wram_bresp  ; // output
+wire                    mon_busy        ; // output
+wire[31:0]              mon_num_active  ; // output
+wire                    mon_loop_enter  ; // output
+wire                    mon_loop_exit   ; // output
+wire                    mon_rdque_full  ; // output
 
 logic[BUFF_ADDR_WIDTH-1:0] rdque_wrptr;
 logic[BUFF_ADDR_WIDTH-1:0] rdque_rdptr;
@@ -186,7 +191,6 @@ task reg_wr(
     input bit[31:0] data,
     input bit verbose = 1
 );
-    //@(posedge clk);
     reg_address <= #DLY addr;
     reg_writedata <= #DLY data;
     reg_write <= #DLY '1;
@@ -200,7 +204,6 @@ task reg_rd(
     output bit[31:0] data,
     input bit verbose = 1
 );
-    //@(posedge clk);
     reg_address <= #DLY addr;
     reg_read <= #DLY '1;
     @(posedge clk);
@@ -419,7 +422,6 @@ task pop_queue();
         x = data1[15:0];
         y = data1[31:16];
         pop_buff[y * W + x] = data0;
-        //pop_buff[y * W + x] = (1<<PIX_FLAG_HANDLED) | (1<<PIX_FLAG_FINISHED) | 1;
         rdque_rdptr += 2;
     end
     reg_wr(CTL_RDQUE_RDPTR, {rdque_rdptr, 2'b00}, 0);
@@ -493,9 +495,8 @@ initial begin
     
     scan_value = 32'd1 << PIX_FLAG_HANDLED;
     scan_flags = (32'd1 << CMD_FLAG_WRITE) | (32'd1 << CMD_FLAG_PUSH_TASK);
-    //scan_rect(0, 0, W, H, scan_value, scan_flags);
-    scan_rect(0  , H-1, W, 1  , scan_value, scan_flags);
     scan_rect(0  , 0  , W, 1  , scan_value, scan_flags);
+    scan_rect(0  , H-1, W, 1  , scan_value, scan_flags);
     scan_rect(0  , 1  , 1, H-2, scan_value, scan_flags);
     scan_rect(W-1, 1  , 1, H-2, scan_value, scan_flags);
 
@@ -511,8 +512,6 @@ initial begin
             show_stats();
             repeat(1000) @(posedge clk);
         end
-        //dump_from_dram();
-        //show_state();
         reg_rd(STS_BUSY, busy, 0);
     end while (busy);
     if (USE_READ_QUEUE) begin

@@ -76,7 +76,8 @@ module accelbrot_fsm #(
     input   wire                        wram_wready     ,
     input   wire[1:0]                   wram_bresp      ,
     input   wire                        wram_bvalid     ,
-    output  wire                        wram_bready
+    output  wire                        wram_bready     ,
+    output  wire                        mon_rdque_full
 );
 
 localparam int BYTES_PER_PIXEL = 4;
@@ -86,6 +87,7 @@ localparam int ALIGN_WIDTH = $clog2(PIX_PER_WORD);
 localparam[7:0] CMD_EDGE_SCAN   = 8'h01;
 localparam[7:0] CMD_RECT_SCAN   = 8'h02;
 localparam[7:0] CMD_RESET_CNTR  = 8'h03;
+localparam[7:0] CMD_ABORT       = 8'h04;
 
 localparam int CMD_FLAG_WRITE       = 0;
 localparam int CMD_FLAG_PUSH_TASK   = 1;
@@ -122,6 +124,7 @@ function[31:0] f_make_word_data(logic handled, logic finished, logic[CWIDTH-1:0]
 endfunction
 
 logic       r_sts_busy      ;
+logic       r_cmd_abort     ;
 logic[31:0] r_sts_num_active;
 logic[31:0] r_sts_total_queued;
 logic[31:0] r_sts_total_exited;
@@ -182,7 +185,9 @@ always_ff @(posedge clk) begin
             r_state <= EDGE_WAIT_CENTER;
         
         EDGE_WAIT_CENTER:
-            if (w_exit_valid) begin
+            if (r_cmd_abort) begin
+                r_state <= IDLE;
+            end else if (w_exit_valid) begin
                 r_state <= EDGE_ADDR0;
             end else if (r_sts_num_active == '0) begin
                 r_state <= IDLE;
@@ -222,7 +227,9 @@ always_ff @(posedge clk) begin
             r_state <= RECT_ACCESS;
         
         RECT_ACCESS:
-            if (w_rect_acs_clken && r_rect_y_last && r_rect_x_last) begin
+            if (r_cmd_abort) begin
+                r_state <= IDLE;
+            end else if (w_rect_acs_clken && r_rect_y_last && r_rect_x_last) begin
                 if (w_cmd_flags_write) begin
                     r_state <= IDLE;
                 end else begin
@@ -231,7 +238,7 @@ always_ff @(posedge clk) begin
             end
         
         RECT_READ_WAIT:
-            if (!r_read_busy) begin
+            if (!r_read_busy || r_cmd_abort) begin
                 r_state <= IDLE;
             end
         
@@ -239,6 +246,17 @@ always_ff @(posedge clk) begin
             r_state <= RESET;
         endcase
         r_sts_busy <= (r_state != IDLE);
+    end
+end
+
+
+always_ff @(posedge clk) begin
+    if (!rstn) begin
+        r_cmd_abort <= '0;
+    end else if (r_state == IDLE) begin
+        r_cmd_abort <= '0;
+    end else if (ctl_command == CMD_ABORT) begin
+        r_cmd_abort <= '1;
     end
 end
 
@@ -912,6 +930,16 @@ always @(posedge clk) begin
         end
     end
 end
+
+logic r_mon_rdque_full;
+always @(posedge clk) begin
+    if (!rstn) begin
+        r_mon_rdque_full <= '0;
+    end else begin
+        r_mon_rdque_full <= r_rdque_afull;
+    end
+end
+assign mon_rdque_full = r_mon_rdque_full;
 
 endmodule
 

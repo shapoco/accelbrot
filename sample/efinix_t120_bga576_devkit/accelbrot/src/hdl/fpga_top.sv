@@ -73,6 +73,8 @@ module fpga_top (
     output  wire[7:0]   led
 );
 
+localparam int SYS_CLK_FREQ = 100e6;
+
 localparam int NCORES = 3;
 localparam int NWORDS = 8;
 localparam int WWIDTH = 34;
@@ -158,6 +160,12 @@ wire[1:0] w_axi1_arburst;
 wire      w_axi1_arvalid;
 wire      w_axi1_arready;
 
+wire      w_mon_busy      ;
+wire[31:0]w_mon_num_active;
+wire      w_mon_loop_enter;
+wire      w_mon_loop_exit ;
+wire      w_mon_rdque_full;
+
 accelbrot #(
     .NCORES         (NCORES ),
     .NWORDS         (NWORDS ),
@@ -201,7 +209,12 @@ accelbrot #(
     .wram_wready        (ddr0_axi1_wready   ), // input
     .wram_bresp         ('0                 ), // input [1:0]
     .wram_bvalid        (ddr0_axi1_bvalid   ), // input
-    .wram_bready        (ddr0_axi1_bready   )  // output
+    .wram_bready        (ddr0_axi1_bready   ), // output
+    .mon_busy           (w_mon_busy         ), // output
+    .mon_num_active     (w_mon_num_active   ), // output[31:0]
+    .mon_loop_enter     (w_mon_loop_enter   ), // output
+    .mon_loop_exit      (w_mon_loop_exit    ), // output
+    .mon_rdque_full     (w_mon_rdque_full   )  // output
 );
 
 assign ddr0_axi1_wid = '0;
@@ -233,6 +246,95 @@ axi2paxi #(
 );
 assign ddr0_axi1_aid = '0;
 assign ddr0_axi1_alock = '0;
+
+function[7:0] f_log2(input logic[31:0] val);
+    for (int i = 31; i >= 0; i--) begin
+        if (val[i]) return i;
+    end
+    return 'd0;
+endfunction
+
+logic[7:0] r_act_clog2;
+logic[15:0] r_act_blink_period_ms;
+logic[15:0] r_act_blink_cntr;
+logic r_led_busy;
+logic r_led_act;
+logic r_led_rdque_full;
+always @(posedge axi_clk) begin
+    if (!axi_rstn) begin
+        r_act_clog2 <= '0;
+        r_act_blink_period_ms <= '0;
+        r_act_blink_cntr <= '0;
+        r_led_busy <= '0;
+        r_led_act <= '0;
+        r_led_rdque_full <= '0; 
+    end else begin
+        r_act_clog2 <= f_log2(w_mon_num_active);
+        r_act_blink_period_ms <= 128 * r_act_clog2 + 'd128;
+        if (!w_mon_busy) begin
+            r_act_blink_cntr <= '0;
+            r_led_busy <= '0;
+            r_led_act <= '0;
+        end else if (r_act_blink_cntr < r_act_blink_period_ms - 1) begin
+            r_act_blink_cntr <= r_act_blink_cntr + 'd1;
+            r_led_busy <= '1;
+        end else begin
+            r_act_blink_cntr <= '0;
+            r_led_busy <= '1;
+            r_led_act <= ~r_led_act;
+        end
+        r_led_rdque_full <= w_mon_rdque_full;
+    end
+end
+assign led[0] = r_led_busy;
+assign led[1] = r_led_act;
+assign led[2] = r_led_rdque_full;
+
+localparam int PERIOD_1MS = SYS_CLK_FREQ / 1000;
+
+logic[31:0] r_timer_1ms;
+logic       r_pulse_1ms;
+always @(posedge axi_clk) begin
+    if (!axi_rstn) begin
+        r_timer_1ms <= 'd0;
+        r_pulse_1ms <= '0;
+    end else if (r_timer_1ms < PERIOD_1MS - 'd1) begin
+        r_timer_1ms <= r_timer_1ms + 'd1;
+        r_pulse_1ms <= '0;
+    end else begin
+        r_timer_1ms <= 'd0;
+        r_pulse_1ms <= '1;
+    end
+end
+
+act_led u_led_loop_enter(
+    .clk        (axi_clk            ), // input
+    .rstn       (axi_rstn           ), // input
+    .pulse_1ms  (r_pulse_1ms        ), // input
+    .act_in     (w_mon_loop_enter   ), // input
+    .led_out    (led[3]             )  // output
+);
+
+act_led u_led_loop_exit(
+    .clk        (axi_clk            ), // input
+    .rstn       (axi_rstn           ), // input
+    .pulse_1ms  (r_pulse_1ms        ), // input
+    .act_in     (w_mon_loop_exit    ), // input
+    .led_out    (led[4]             )  // output
+);
+
+wire w_reg_act = w_reg_write | w_reg_read;
+
+act_led u_led_reg_write(
+    .clk        (axi_clk        ), // input
+    .rstn       (axi_rstn       ), // input
+    .pulse_1ms  (r_pulse_1ms    ), // input
+    .act_in     (w_reg_act      ), // input
+    .led_out    (led[5]         )  // output
+);
+
+assign led[6] = '0;
+assign led[7] = '0;
 
 endmodule
 

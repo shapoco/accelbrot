@@ -72,9 +72,15 @@ This 4:40 video was created by generating 230 Full-HD images using FPGA and inte
 |`0x0138`|`RO`|`STS_NUM_ENTERED`|Number of pixels waiting at the entrance of the loop|
 |`0x0140`|`RO`|`STS_NUM_RUNNING`|Number of running pixels|
 |`0x0144`|`RO`|`STS_NUM_EXITED`|Number of pixels waiting at the exit of the loop|
+|`0x0150`|`RO`|`STS_TOTAL_QUEUED`|Total number of pixels queued into loop|
+|`0x0158`|`RO`|`STS_TOTAL_EXITED`|Total number of pixels exited from loop|
 |`0x0160`|`RO`|`STS_MAX_ITER`|Maximum number of iterations|
 |`0x0168`|`RO`|`STS_TOTAL_ITER_L`|Lower 32 bits of total iterations|
 |`0x016C`|`RO`|`STS_TOTAL_ITER_H`|Higher 32 bits of total iterations|
+|`0x0170`|`RO`|`STS_CLK_CNTR_L`|Lower 32 bits of free-run clock counter|
+|`0x0174`|`RO`|`STS_CLK_CNTR_H`|Lower 32 bits of free-run clock counter|
+|`0x0180`|`RO`|`STS_WRAM_WRBYTES`|Number of bytes written to DDR since last status latch|
+|`0x0188`|`RO`|`STS_WRAM_RDBYTES`|Number of bytes read from DDR since last status latch|
 |`0x0400`|`W`|`CTL_SOFT_RESET`|Soft Reset|
 |`0x0410`|`W`|`CTL_COMMAND`|Control Command|
 |`0x0420`|`R/W`|`CTL_IMG_ADDR_L`|Lower 32 bits of base address of image|
@@ -95,6 +101,8 @@ This 4:40 video was created by generating 230 Full-HD images using FPGA and inte
 |`0x060c`|`R/W`|`CTL_RECT_HEIGHT`|Height of rect|
 |`0x0610`|`R/W`|`CTL_RECT_VALUE`|Value userd for fill|
 |`0x0614`|`R/W`|`CTL_CMD_FLAGS`|Command options|
+|`0x0700`|`RO`|`CTL_RDQUE_WRPTR`|Write-pointer of read queue|
+|`0x0704`|`R/W`|`CTL_RDQUE_RDPTR`|Read-pointer of read queue|
 |`0x4000-0x7FFF`|`RO`|`BUFF_RAM`|Read buffer|
 
 ## How to Control

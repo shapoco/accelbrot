@@ -3,3 +3,4 @@ outflow/
 work_*/
 .lock
 *.vdb
+*_Conflict.xml
