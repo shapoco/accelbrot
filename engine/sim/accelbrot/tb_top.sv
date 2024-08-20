@@ -3,6 +3,9 @@
 
 module tb_top;
 
+localparam int SYS_CLK_FREQ = 150e6;
+localparam time CLK_PERIOD = 1s / SYS_CLK_FREQ;
+
 localparam int NCORES = 3;
 localparam int NWORDS = 8;
 localparam int WWIDTH = 34;
@@ -13,6 +16,8 @@ localparam int TWIDTH = PWIDTH * 2;
 localparam int CWIDTH = 20;
 localparam int QDEPTH = 16 * 1024;
 localparam int CNTR_WIDTH = $clog2(NWORDS);
+
+localparam int BUFF_ADDR_WIDTH = 15;
 
 localparam int AXI_ADDR_WIDTH = 32;
 localparam int AXI_DATA_WIDTH = 128;
@@ -34,9 +39,15 @@ localparam[15:0] STS_NUM_QUEUED     = 16'h0134;
 localparam[15:0] STS_NUM_ENTERED    = 16'h0138;
 localparam[15:0] STS_NUM_RUNNING    = 16'h0140;
 localparam[15:0] STS_NUM_EXITED     = 16'h0144;
+localparam[15:0] STS_TOTAL_QUEUED   = 16'h0150;
+localparam[15:0] STS_TOTAL_EXITED   = 16'h0158;
 localparam[15:0] STS_MAX_ITER       = 16'h0160;
 localparam[15:0] STS_TOTAL_ITER_L   = 16'h0168;
 localparam[15:0] STS_TOTAL_ITER_H   = 16'h016C;
+localparam[15:0] STS_CLK_CNTR_L     = 16'h0170;
+localparam[15:0] STS_CLK_CNTR_H     = 16'h0174;
+localparam[15:0] STS_WRAM_WRBYTES   = 16'h0180;
+localparam[15:0] STS_WRAM_RDBYTES   = 16'h0188;
 localparam[15:0] CTL_SOFT_RESET     = 16'h0400;
 localparam[15:0] CTL_COMMAND        = 16'h0410;
 localparam[15:0] CTL_IMG_ADDR_L     = 16'h0420;
@@ -57,13 +68,17 @@ localparam[15:0] CTL_RECT_WIDTH     = 16'h0608;
 localparam[15:0] CTL_RECT_HEIGHT    = 16'h060C;
 localparam[15:0] CTL_RECT_VALUE     = 16'h0610;
 localparam[15:0] CTL_CMD_FLAGS      = 16'h0614;
-localparam[15:0] BUFF_BASE          = 16'h4000;
+localparam[15:0] CTL_RDQUE_WRPTR    = 16'h0700;
+localparam[15:0] CTL_RDQUE_RDPTR    = 16'h0704;
+localparam[15:0] BUFF_BASE          = 16'h8000;
 
-localparam[7:0] CMD_EDGE_SCAN = 8'h01;
-localparam[7:0] CMD_RECT_SCAN = 8'h02;
+localparam[7:0] CMD_EDGE_SCAN   = 8'h01;
+localparam[7:0] CMD_RECT_SCAN   = 8'h02;
+localparam[7:0] CMD_RESET_CNTR  = 8'h03;
 
 localparam int CMD_FLAG_WRITE       = 0;
 localparam int CMD_FLAG_PUSH_TASK   = 1;
+localparam int CMD_FLAG_RDQUE_ENA   = 2;
 
 localparam int PIX_FLAG_HANDLED     = 31;
 localparam int PIX_FLAG_FINISHED    = 30;
@@ -105,6 +120,9 @@ wire                    wram_wready ; // output
 wire                    wram_bvalid ; // output
 wire                    wram_bready ; // input
 wire[1:0]               wram_bresp  ; // output
+
+logic[BUFF_ADDR_WIDTH-1:0] rdque_rdptr;
+initial rdque_rdptr = '0;
 
 axi_ram #(
     .ADDR_WIDTH(AXI_ADDR_WIDTH),
@@ -153,8 +171,8 @@ accelbrot #(
 );
 
 initial forever begin
-    clk = 0; #5ns;
-    clk = 1; #5ns;
+    clk = 0; #(CLK_PERIOD/2);
+    clk = 1; #(CLK_PERIOD/2);
 end
 
 task reg_wr(
@@ -195,6 +213,7 @@ task wait_idle();
             if (busy == 0) disable wait_idle_blk;
         end
     end
+    repeat (10) @(posedge clk);
 endtask
 
 task show_state();
@@ -246,26 +265,88 @@ task write_param(
     end
 endtask
 
+real last_time;
+initial last_time = 0;
+
+`define NEW_REGS
+
 task show_stats();
     int unsigned active;
     int unsigned queued;
     int unsigned entered;
     int unsigned running;
     int unsigned exited;
+    int unsigned total_queued;
+    int unsigned total_exited;
     int unsigned max_iter;
     int unsigned total_iter_l;
     int unsigned total_iter_h;
+    int unsigned rdque_wrptr;
+    int unsigned rdque_size;
+    int unsigned clk_cntr_l;
+    int unsigned clk_cntr_h;
+    int unsigned wram_wrbytes;
+    int unsigned wram_rdbytes;
+    real curr_time;
+    real delta_time;
+    real wr_Mbyteps;
+    real rd_Mbyteps;
     reg_wr(STS_LATCH, 1, 0);
-    reg_rd(STS_NUM_ACTIVE     , active    , 0);
-    reg_rd(STS_NUM_QUEUED     , queued    , 0);
-    reg_rd(STS_NUM_ENTERED    , entered   , 0);
-    reg_rd(STS_NUM_RUNNING    , running   , 0);
-    reg_rd(STS_NUM_EXITED     , exited    , 0);
-    reg_rd(STS_MAX_ITER       , max_iter  , 0);
-    reg_rd(STS_TOTAL_ITER_L   , total_iter_l, 0);
-    reg_rd(STS_TOTAL_ITER_H   , total_iter_h, 0);
+    reg_rd(STS_NUM_ACTIVE   , active    , 0);
+    reg_rd(STS_NUM_QUEUED   , queued    , 0);
+    reg_rd(STS_NUM_ENTERED  , entered   , 0);
+    reg_rd(STS_NUM_RUNNING  , running   , 0);
+    reg_rd(STS_NUM_EXITED   , exited    , 0);
+    reg_rd(STS_MAX_ITER     , max_iter  , 0);
+    reg_rd(STS_TOTAL_ITER_L , total_iter_l, 0);
+    reg_rd(STS_TOTAL_ITER_H , total_iter_h, 0);
+`ifdef NEW_REGS
+    reg_rd(STS_TOTAL_QUEUED , total_queued, 0);
+    reg_rd(STS_TOTAL_EXITED , total_exited, 0);
+    reg_rd(STS_CLK_CNTR_L   , clk_cntr_l, 0);
+    reg_rd(STS_CLK_CNTR_H   , clk_cntr_h, 0);
+    reg_rd(STS_WRAM_WRBYTES , wram_wrbytes, 0);
+    reg_rd(STS_WRAM_RDBYTES , wram_rdbytes, 0);
+    reg_rd(CTL_RDQUE_WRPTR  , rdque_wrptr, 0);
+    rdque_size = rdque_wrptr - rdque_rdptr;
+    curr_time = real'({clk_cntr_h, clk_cntr_l}) / real'(SYS_CLK_FREQ);
+    delta_time = curr_time - last_time;
+    wr_Mbyteps = real'(wram_wrbytes) / 1000000.0 / delta_time;
+    rd_Mbyteps = real'(wram_rdbytes) / 1000000.0 / delta_time;
+    $display("act=%1d, que=%1d, entr=%1d, run=%1d, exit=%1d, tot_que=%1d, tot_exit=%1d, max_iter=%1d, total_iter=%1d, wram_wr=%.3fMB/s, wram_rd=%.3fMB/s, rdque_size=%1d",
+        active, queued, entered, running, exited, total_queued, total_exited, max_iter, {total_iter_h, total_iter_l}, wr_Mbyteps, rd_Mbyteps, rdque_size);
+    last_time = curr_time;
+`else
     $display("active=%1d, queued=%1d, entered=%1d, running=%1d, exited=%1d, max_iter=%1d, total_iter=%1d",
         active, queued, entered, running, exited, max_iter, {total_iter_h, total_iter_l});
+`endif
+endtask
+
+localparam int BASE_ADDR = 'h1000;
+localparam int W = 32;
+//localparam int W = 16;
+localparam int H = W / 2;
+
+bit[W*H][31:0] diff_buff;
+bit[W*H][31:0] pop_buff;
+
+task print_pixel(input bit[31:0] data);
+    if (data[PIX_FLAG_FINISHED]) begin
+        case(data[CWIDTH-1:0] % 8) 
+        4'h0: $write(" ");
+        4'h1: $write(".");
+        4'h2: $write(";");
+        4'h3: $write("/");
+        4'h4: $write("l");
+        4'h5: $write("S");
+        4'h6: $write("H");
+        4'h7: $write("$");
+        endcase
+    end else if (data[PIX_FLAG_HANDLED]) begin
+        $write("?");
+    end else begin
+        $write(" ");
+    end
 endtask
 
 task dump_from_dram();
@@ -273,22 +354,8 @@ task dump_from_dram();
         for (int x = 0; x < W; x++) begin
             int unsigned data;
             dram.read_uint32(BASE_ADDR + (y * W + x) * 4, data);
-            if (data[PIX_FLAG_FINISHED]) begin
-                case(data[CWIDTH-1:0] % 8) 
-                4'h0: $write(" ");
-                4'h1: $write(".");
-                4'h2: $write(";");
-                4'h3: $write("/");
-                4'h4: $write("l");
-                4'h5: $write("S");
-                4'h6: $write("H");
-                4'h7: $write("$");
-                endcase
-            end else if (data[PIX_FLAG_HANDLED]) begin
-                $write("?");
-            end else begin
-                $write(" ");
-            end
+            print_pixel(data);
+            diff_buff[y * W + x] = data;
         end
         $display();
     end
@@ -296,41 +363,60 @@ endtask
 
 task dump_thru_reg();
     for (int y = 0; y < H; y++) begin
+        int num_diff;
+        num_diff = '0;
         scan_rect(0, y, W, 1, 0, 0, 0);
         for (int x = 0; x < W; x++) begin
             int unsigned data;
             reg_rd(BUFF_BASE + x * 4, data, 0);
-            if (data[PIX_FLAG_FINISHED]) begin
-                case(data[CWIDTH-1:0] % 8) 
-                4'h0: $write(" ");
-                4'h1: $write(".");
-                4'h2: $write(";");
-                4'h3: $write("/");
-                4'h4: $write("l");
-                4'h5: $write("S");
-                4'h6: $write("H");
-                4'h7: $write("$");
-                endcase
-            end else if (data[PIX_FLAG_HANDLED]) begin
-                $write("?");
-            end else begin
-                $write(" ");
+            print_pixel(data);
+            if (diff_buff[y * W + x] != data) begin
+                num_diff++;
             end
+        end
+        if (num_diff != 0) begin
+            $write(" %1d words differ.", num_diff);
         end
         $display();
     end
-
 endtask
 
-localparam int BASE_ADDR = 'h1000;
-localparam int W = 32;
-localparam int H = W / 2;
+task clear_pop_buff();
+    for (int i = 0; i < W * H; i++) begin
+        pop_buff[i] = '0;
+    end
+endtask
+
+task pop_queue();
+    int unsigned rdque_wrptr;
+    reg_rd(CTL_RDQUE_WRPTR, rdque_wrptr, 0);
+    while (rdque_rdptr != rdque_wrptr) begin
+        int unsigned data0, data1;
+        int x, y;
+        reg_rd(BUFF_BASE + rdque_rdptr * 4 + 0, data0, 0);
+        reg_rd(BUFF_BASE + rdque_rdptr * 4 + 4, data1, 0);
+        x = data1[15:0];
+        y = data1[31:16];
+        pop_buff[y * W + x] = data0;
+        //pop_buff[y * W + x] = (1<<PIX_FLAG_HANDLED) | (1<<PIX_FLAG_FINISHED) | 1;
+        rdque_rdptr += 2;
+    end
+    reg_wr(CTL_RDQUE_RDPTR, rdque_rdptr, 0);
+    for (int y = 0; y < H; y++) begin
+        for (int x = 0; x < W; x++) begin
+            print_pixel(pop_buff[y * W + x]);
+        end
+        $display();
+    end
+endtask
 
 localparam[BWIDTH-1:0] ONE = {32'd1, {(BWIDTH-IWIDTH){1'b0}}};
 
 localparam[BWIDTH-1:0] A = -(ONE / 2);
 localparam[BWIDTH-1:0] B = '0;
 localparam[BWIDTH-1:0] RANGE = ONE * 2;
+
+localparam bit USE_READ_QUEUE = '1;
 
 initial begin
     int unsigned scan_value;
@@ -365,6 +451,9 @@ initial begin
 
     reg_wr(CTL_MAX_ITER  , 16);
     
+    reg_wr(CTL_COMMAND, CMD_RESET_CNTR);
+    if (USE_READ_QUEUE) clear_pop_buff();
+
     scan_value = 0;
     scan_flags = (32'd1 << CMD_FLAG_WRITE);
     scan_rect(0, 0, W, H, scan_value, scan_flags);
@@ -376,26 +465,27 @@ initial begin
     scan_rect(0  , 0  , W, 1  , scan_value, scan_flags);
     scan_rect(0  , 1  , 1, H-2, scan_value, scan_flags);
     scan_rect(W-1, 1  , 1, H-2, scan_value, scan_flags);
-    
+
+    if (USE_READ_QUEUE) reg_wr(CTL_CMD_FLAGS, 32'd1 << CMD_FLAG_RDQUE_ENA);
     reg_wr(CTL_COMMAND, CMD_EDGE_SCAN);
     show_state();
     
     do begin
         show_stats();
+        if (USE_READ_QUEUE) pop_queue();
         //dump_from_dram();
         repeat(1000) @(posedge clk);
         //show_state();
         reg_rd(STS_BUSY, busy, 0);
     end while (busy);
-    
-    //$display("----------------------------------------------------------------");
-    //
-    //show_stats();
-    //dump_from_dram();
-    
+    show_stats();
+    if (USE_READ_QUEUE) pop_queue();
+
     $display("----------------------------------------------------------------");
-    
+    dump_from_dram();
+    $display("----------------------------------------------------------------");
     dump_thru_reg();
+    $display("----------------------------------------------------------------");
     
     $finish(0);
 end

@@ -53,16 +53,13 @@ localparam int RST_WIDTH = 10;
 
 localparam int BYTES_PER_PIXEL = 4;
 
-localparam[7:0] CMD_EDGE_SCAN = 8'h01;
-localparam[7:0] CMD_RECT_SCAN = 8'h02;
-
 localparam int SCAN_FLAG_WRITE = 0;
 localparam int SCAN_FLAG_PUSH_TASK  = 1;
 
 localparam int PIX_FLAG_HANDLED     = 31;
 localparam int PIX_FLAG_FINISHED    = 30;
 
-localparam int BUFF_ADDR_WIDTH = 14;
+localparam int BUFF_ADDR_WIDTH = 15;
 
 typedef enum {
     RESET, IDLE, 
@@ -89,9 +86,13 @@ wire[31:0]                  w_sts_num_active;
 wire[31:0]                  w_sts_num_queued;
 wire[31:0]                  w_sts_num_entered;
 wire[31:0]                  w_sts_num_running;
-wire[31:0]                  w_sts_num_exited ;
+wire[31:0]                  w_sts_num_exited;
+wire[31:0]                  w_sts_total_queued;
+wire[31:0]                  w_sts_total_exited;
 wire[CWIDTH-1:0]            w_sts_max_iter  ;
 wire[CWIDTH+PWIDTH*2-1:0]   w_sts_total_iter;
+wire[7:0]                   w_sts_wram_wrbytes;
+wire[7:0]                   w_sts_wram_rdbytes;
 
 wire                        w_ctl_soft_reset;
 wire[7:0]                   w_ctl_command   ;
@@ -110,6 +111,8 @@ wire[PWIDTH-1:0]            w_ctl_rect_width;
 wire[PWIDTH-1:0]            w_ctl_rect_height;
 wire[31:0]                  w_ctl_rect_value;
 wire[31:0]                  w_ctl_cmd_flags ;
+wire[BUFF_ADDR_WIDTH-1:0]   w_ctl_rdque_wrptr;
+wire[BUFF_ADDR_WIDTH-1:0]   w_ctl_rdque_rdptr;
 wire[BUFF_ADDR_WIDTH-1:0]   w_buff_addr     ;
 wire                        w_buff_rd_en    ;
 wire[31:0]                  w_buff_rd_data  ;
@@ -141,8 +144,12 @@ accelbrot_reg #(
     .sts_num_entered    (w_sts_num_entered  ), // input [31:0]
     .sts_num_running    (w_sts_num_running  ), // input [31:0]
     .sts_num_exited     (w_sts_num_exited   ), // input [31:0]
+    .sts_total_queued   (w_sts_total_queued ), // input [31:0]
+    .sts_total_exited   (w_sts_total_exited ), // input [31:0]
     .sts_max_iter       (w_sts_max_iter     ), // input [CWIDTH-1:0]
     .sts_total_iter     (w_sts_total_iter   ), // input [CWIDTH+PWIDTH*2-1:0]
+    .sts_wram_wrbytes   (w_sts_wram_wrbytes ), // input [7:0]
+    .sts_wram_rdbytes   (w_sts_wram_rdbytes ), // input [7:0]
     .ctl_soft_reset     (w_ctl_soft_reset   ), // output
     .ctl_command        (w_ctl_command      ), // output[7:0]
     .ctl_img_addr       (w_ctl_img_addr     ), // output[AXI_ADDR_WIDTH-1:0]
@@ -154,12 +161,14 @@ accelbrot_reg #(
     .ctl_a_step_x       (w_ctl_a_step_x     ), // output[BWIDTH-1:0]
     .ctl_b_step_y       (w_ctl_b_step_y     ), // output[BWIDTH-1:0]
     .ctl_max_iter       (w_ctl_max_iter     ), // output[CWIDTH-1:0]
-    .ctl_rect_x         (w_ctl_rect_x       ), // output  wire[PWIDTH-1:0]
-    .ctl_rect_y         (w_ctl_rect_y       ), // output  wire[PWIDTH-1:0]
-    .ctl_rect_width     (w_ctl_rect_width   ), // output  wire[PWIDTH-1:0]
-    .ctl_rect_height    (w_ctl_rect_height  ), // output  wire[PWIDTH-1:0]
-    .ctl_rect_value     (w_ctl_rect_value   ), // output  wire[PWIDTH-1:0]
-    .ctl_cmd_flags      (w_ctl_cmd_flags    ), // output  wire[PWIDTH-1:0]
+    .ctl_rect_x         (w_ctl_rect_x       ), // output[PWIDTH-1:0]
+    .ctl_rect_y         (w_ctl_rect_y       ), // output[PWIDTH-1:0]
+    .ctl_rect_width     (w_ctl_rect_width   ), // output[PWIDTH-1:0]
+    .ctl_rect_height    (w_ctl_rect_height  ), // output[PWIDTH-1:0]
+    .ctl_rect_value     (w_ctl_rect_value   ), // output[PWIDTH-1:0]
+    .ctl_cmd_flags      (w_ctl_cmd_flags    ), // output[PWIDTH-1:0]
+    .ctl_rdque_wrptr    (w_ctl_rdque_wrptr  ), // input [BUFF_ADDR_WIDTH-1:0]
+    .ctl_rdque_rdptr    (w_ctl_rdque_rdptr  ), // output[BUFF_ADDR_WIDTH-1:0]
     .buff_addr          (w_buff_addr        ), // output[BUFF_ADDR_WIDTH-1:0]
     .buff_rd_en         (w_buff_rd_en       ), // output
     .buff_rd_data       (w_buff_rd_data     ), // input [31:0]
@@ -200,62 +209,68 @@ accelbrot_fsm #(
     .AXI_DATA_WIDTH (AXI_DATA_WIDTH ),
     .BUFF_ADDR_WIDTH(BUFF_ADDR_WIDTH)
 ) u_fsm (
-    .clk            (clk                ), // input
-    .rstn           (w_rstn             ), // input
-    .sts_busy       (w_sts_busy         ), // output
-    .sts_fsm_state  (w_sts_fsm_state    ), // output[7:0]
-    .sts_axi_state  (w_sts_axi_state    ), // output[31:0]
-    .sts_num_active (w_sts_num_active   ), // output[31:0]
-    .sts_max_iter   (w_sts_max_iter     ), // output[CWIDTH-1:0]
-    .sts_total_iter (w_sts_total_iter   ), // output[CWIDTH+PWIDTH*2-1:0]
-    .ctl_command    (w_ctl_command      ), // input [7:0]
-    .ctl_img_addr   (w_ctl_img_addr     ), // input [AXI_ADDR_WIDTH-1:0]
-    .ctl_img_width  (w_ctl_img_width    ), // input [PWIDTH-1:0]
-    .ctl_img_height (w_ctl_img_height   ), // input [PWIDTH-1:0]
-    .ctl_img_stride (w_ctl_img_stride   ), // input [15:0]
-    .ctl_rect_x     (w_ctl_rect_x       ), // input [PWIDTH-1:0]
-    .ctl_rect_y     (w_ctl_rect_y       ), // input [PWIDTH-1:0]
-    .ctl_rect_width (w_ctl_rect_width   ), // input [PWIDTH-1:0]
-    .ctl_rect_height(w_ctl_rect_height  ), // input [PWIDTH-1:0]
-    .ctl_rect_value (w_ctl_rect_value   ), // input [31:0]
-    .ctl_cmd_flags  (w_ctl_cmd_flags    ), // input [31:0]
-    .buff_addr      (w_buff_addr        ), // input [BUFF_ADDR_WIDTH-1:0]
-    .buff_rd_en     (w_buff_rd_en       ), // input
-    .buff_rd_data   (w_buff_rd_data     ), // input [31:0]
-    .buff_rd_ack    (w_buff_rd_ack      ), // input
-    .push_x         (w_push_x           ), // output[PWIDTH-1:0]
-    .push_y         (w_push_y           ), // output[PWIDTH-1:0]
-    .push_valid     (w_push_valid       ), // output
-    .push_ready     (w_push_ready       ), // input
-    .exit_tag       (w_exit_tag         ), // output[TWIDTH-1:0]
-    .exit_count     (w_exit_count       ), // output[CWIDTH-1:0]
-    .exit_valid     (w_exit_valid       ), // output
-    .exit_ready     (w_exit_ready       ), // input
-    .wram_araddr    (wram_araddr        ), // output[AXI_ADDR_WIDTH-1:0]
-    .wram_arlen     (wram_arlen         ), // output[7:0]
-    .wram_arsize    (wram_arsize        ), // output[2:0]
-    .wram_arburst   (wram_arburst       ), // output[1:0]
-    .wram_arvalid   (wram_arvalid       ), // output
-    .wram_arready   (wram_arready       ), // input
-    .wram_rdata     (wram_rdata         ), // input [AXI_DATA_WIDTH-1:0]
-    .wram_rlast     (wram_rlast         ), // input
-    .wram_rresp     (wram_rresp         ), // input [1:0]
-    .wram_rvalid    (wram_rvalid        ), // input
-    .wram_rready    (wram_rready        ), // output
-    .wram_awaddr    (wram_awaddr        ), // output[AXI_ADDR_WIDTH-1:0]
-    .wram_awlen     (wram_awlen         ), // output[7:0]
-    .wram_awsize    (wram_awsize        ), // output[2:0]
-    .wram_awburst   (wram_awburst       ), // output[1:0]
-    .wram_awvalid   (wram_awvalid       ), // output
-    .wram_awready   (wram_awready       ), // input
-    .wram_wdata     (wram_wdata         ), // output[AXI_DATA_WIDTH-1:0]
-    .wram_wstrb     (wram_wstrb         ), // output[AXI_STRB_WIDTH-1:0]
-    .wram_wlast     (wram_wlast         ), // output
-    .wram_wvalid    (wram_wvalid        ), // output
-    .wram_wready    (wram_wready        ), // input
-    .wram_bresp     (wram_bresp         ), // input [1:0]
-    .wram_bvalid    (wram_bvalid        ), // input
-    .wram_bready    (wram_bready        )  // output
+    .clk                (clk                ), // input
+    .rstn               (w_rstn             ), // input
+    .sts_busy           (w_sts_busy         ), // output
+    .sts_fsm_state      (w_sts_fsm_state    ), // output[7:0]
+    .sts_axi_state      (w_sts_axi_state    ), // output[31:0]
+    .sts_num_active     (w_sts_num_active   ), // output[31:0]
+    .sts_total_queued   (w_sts_total_queued ), // output[31:0]
+    .sts_total_exited   (w_sts_total_exited ), // output[31:0]
+    .sts_max_iter       (w_sts_max_iter     ), // output[CWIDTH-1:0]
+    .sts_total_iter     (w_sts_total_iter   ), // output[CWIDTH+PWIDTH*2-1:0]
+    .sts_wram_wrbytes   (w_sts_wram_wrbytes ), // output[7:0]
+    .sts_wram_rdbytes   (w_sts_wram_rdbytes ), // output[7:0]
+    .ctl_command        (w_ctl_command      ), // input [7:0]
+    .ctl_img_addr       (w_ctl_img_addr     ), // input [AXI_ADDR_WIDTH-1:0]
+    .ctl_img_width      (w_ctl_img_width    ), // input [PWIDTH-1:0]
+    .ctl_img_height     (w_ctl_img_height   ), // input [PWIDTH-1:0]
+    .ctl_img_stride     (w_ctl_img_stride   ), // input [15:0]
+    .ctl_rect_x         (w_ctl_rect_x       ), // input [PWIDTH-1:0]
+    .ctl_rect_y         (w_ctl_rect_y       ), // input [PWIDTH-1:0]
+    .ctl_rect_width     (w_ctl_rect_width   ), // input [PWIDTH-1:0]
+    .ctl_rect_height    (w_ctl_rect_height  ), // input [PWIDTH-1:0]
+    .ctl_rect_value     (w_ctl_rect_value   ), // input [31:0]
+    .ctl_cmd_flags      (w_ctl_cmd_flags    ), // input [31:0]
+    .ctl_rdque_wrptr    (w_ctl_rdque_wrptr  ), // output[BUFF_ADDR_WIDTH-1:0]
+    .ctl_rdque_rdptr    (w_ctl_rdque_rdptr  ), // input [BUFF_ADDR_WIDTH-1:0]
+    .buff_addr          (w_buff_addr        ), // input [BUFF_ADDR_WIDTH-1:0]
+    .buff_rd_en         (w_buff_rd_en       ), // input
+    .buff_rd_data       (w_buff_rd_data     ), // input [31:0]
+    .buff_rd_ack        (w_buff_rd_ack      ), // input
+    .push_x             (w_push_x           ), // output[PWIDTH-1:0]
+    .push_y             (w_push_y           ), // output[PWIDTH-1:0]
+    .push_valid         (w_push_valid       ), // output
+    .push_ready         (w_push_ready       ), // input
+    .exit_tag           (w_exit_tag         ), // output[TWIDTH-1:0]
+    .exit_count         (w_exit_count       ), // output[CWIDTH-1:0]
+    .exit_valid         (w_exit_valid       ), // output
+    .exit_ready         (w_exit_ready       ), // input
+    .wram_araddr        (wram_araddr        ), // output[AXI_ADDR_WIDTH-1:0]
+    .wram_arlen         (wram_arlen         ), // output[7:0]
+    .wram_arsize        (wram_arsize        ), // output[2:0]
+    .wram_arburst       (wram_arburst       ), // output[1:0]
+    .wram_arvalid       (wram_arvalid       ), // output
+    .wram_arready       (wram_arready       ), // input
+    .wram_rdata         (wram_rdata         ), // input [AXI_DATA_WIDTH-1:0]
+    .wram_rlast         (wram_rlast         ), // input
+    .wram_rresp         (wram_rresp         ), // input [1:0]
+    .wram_rvalid        (wram_rvalid        ), // input
+    .wram_rready        (wram_rready        ), // output
+    .wram_awaddr        (wram_awaddr        ), // output[AXI_ADDR_WIDTH-1:0]
+    .wram_awlen         (wram_awlen         ), // output[7:0]
+    .wram_awsize        (wram_awsize        ), // output[2:0]
+    .wram_awburst       (wram_awburst       ), // output[1:0]
+    .wram_awvalid       (wram_awvalid       ), // output
+    .wram_awready       (wram_awready       ), // input
+    .wram_wdata         (wram_wdata         ), // output[AXI_DATA_WIDTH-1:0]
+    .wram_wstrb         (wram_wstrb         ), // output[AXI_STRB_WIDTH-1:0]
+    .wram_wlast         (wram_wlast         ), // output
+    .wram_wvalid        (wram_wvalid        ), // output
+    .wram_wready        (wram_wready        ), // input
+    .wram_bresp         (wram_bresp         ), // input [1:0]
+    .wram_bvalid        (wram_bvalid        ), // input
+    .wram_bready        (wram_bready        )  // output
 );
 
 wire[WWIDTH-1:0]w_enter_a       ;

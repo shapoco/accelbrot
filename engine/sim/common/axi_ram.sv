@@ -39,8 +39,8 @@ module axi_ram #(
 
 localparam time DLY = 100ps;
 
-typedef logic[ADDR_WIDTH-1:0] addr_t;
 `ifdef AXI_RAM_USE_HASHMAP
+typedef logic[ADDR_WIDTH-1:0] addr_t;
 byte mem[addr_t];
 `else
 byte mem[0:DEPTH-1];
@@ -91,10 +91,10 @@ initial forever begin
         data = '0;
         for (int b = 0; b < STRB_WIDTH; b++) begin
 `ifdef AXI_RAM_USE_HASHMAP
-            if (mem.exist(word_addr + b)) begin
+            if (mem.exists(word_addr + b)) begin
                 data[b] = mem[word_addr + b];
             end else begin
-                data[b] = 'z;
+                data[b] = '0;
             end
 `else
             data[b] = mem[word_addr + b];
@@ -110,6 +110,12 @@ logic[DATA_WIDTH-1:0] r_rdata;
 logic r_rlast;
 logic[1:0] r_rresp;
 logic r_rvalid;
+initial begin
+    r_rdata = '0;
+    r_rlast = '0;
+    r_rresp = '0;
+    r_rvalid = '0;
+end
 always @(posedge clk) begin
     if (r_rvalid && axi_rready) begin
         void'(rresp_queue.pop_front());

@@ -21,8 +21,12 @@ module accelbrot_fsm #(
     output  wire[7:0]                   sts_fsm_state   ,
     output  wire[31:0]                  sts_axi_state   ,
     output  wire[31:0]                  sts_num_active  ,
+    output  wire[31:0]                  sts_total_queued,
+    output  wire[31:0]                  sts_total_exited,
     output  wire[CWIDTH-1:0]            sts_max_iter    ,
     output  wire[CWIDTH+PWIDTH*2-1:0]   sts_total_iter  ,
+    output  wire[7:0]                   sts_wram_wrbytes,
+    output  wire[7:0]                   sts_wram_rdbytes,
     input   wire[7:0]                   ctl_command     ,
     input   wire[AXI_ADDR_WIDTH-1:0]    ctl_img_addr    ,
     input   wire[PWIDTH-1:0]            ctl_img_width   ,
@@ -34,6 +38,8 @@ module accelbrot_fsm #(
     input   wire[PWIDTH-1:0]            ctl_rect_height ,
     input   wire[31:0]                  ctl_rect_value  ,
     input   wire[31:0]                  ctl_cmd_flags   ,
+    output  wire[BUFF_ADDR_WIDTH-1:0]   ctl_rdque_wrptr ,
+    input   wire[BUFF_ADDR_WIDTH-1:0]   ctl_rdque_rdptr ,
     input   wire[BUFF_ADDR_WIDTH-1:0]   buff_addr       ,
     input   wire                        buff_rd_en      ,
     output  wire[31:0]                  buff_rd_data    ,
@@ -77,11 +83,13 @@ localparam int BYTES_PER_PIXEL = 4;
 localparam int PIX_PER_WORD = AXI_DATA_WIDTH / 32;
 localparam int ALIGN_WIDTH = $clog2(PIX_PER_WORD);
 
-localparam[7:0] CMD_EDGE_SCAN = 8'h01;
-localparam[7:0] CMD_RECT_SCAN = 8'h02;
+localparam[7:0] CMD_EDGE_SCAN   = 8'h01;
+localparam[7:0] CMD_RECT_SCAN   = 8'h02;
+localparam[7:0] CMD_RESET_CNTR  = 8'h03;
 
 localparam int CMD_FLAG_WRITE       = 0;
 localparam int CMD_FLAG_PUSH_TASK   = 1;
+localparam int CMD_FLAG_RDQUE_ENA   = 2;
 
 localparam int PIX_FLAG_HANDLED     = 31;
 localparam int PIX_FLAG_FINISHED    = 30;
@@ -104,17 +112,38 @@ localparam[2:0] NEIGHBOR_DL = 'd5;
 localparam[2:0] NEIGHBOR_DC = 'd6;
 localparam[2:0] NEIGHBOR_DR = 'd7;
 
+function[31:0] f_make_word_data(logic handled, logic finished, logic[CWIDTH-1:0] count);
+    logic[31:0] v_ret;
+    v_ret = '0;
+    v_ret[PIX_FLAG_HANDLED] = handled;
+    v_ret[PIX_FLAG_FINISHED] = finished;
+    v_ret[CWIDTH-1:0] = count;
+    return v_ret;
+endfunction
+
 logic       r_sts_busy      ;
 logic[31:0] r_sts_num_active;
+logic[31:0] r_sts_total_queued;
+logic[31:0] r_sts_total_exited;
+logic[7:0]  r_sts_wram_wrbytes;
+logic[7:0]  r_sts_wram_rdbytes;
 assign sts_busy = r_sts_busy;
 assign sts_num_active = r_sts_num_active;
+assign sts_total_queued = r_sts_total_queued;
+assign sts_total_exited = r_sts_total_exited;
+assign sts_wram_wrbytes = r_sts_wram_wrbytes;
+assign sts_wram_rdbytes = r_sts_wram_rdbytes;
 
 wire[31:0] w_wram_rdata;
 
+wire w_cmd_reset_cntr = (ctl_command == CMD_RESET_CNTR) ? '1 : '0;
+
 wire w_cmd_flags_write     = ctl_cmd_flags[CMD_FLAG_WRITE];
 wire w_cmd_flags_push_task = ctl_cmd_flags[CMD_FLAG_PUSH_TASK];
+wire w_cmd_flags_rdque_ena = ctl_cmd_flags[CMD_FLAG_RDQUE_ENA];
 
 wire w_exit_ready;
+wire w_exit_valid;
 wire w_exit_acpt;
 
 wire w_edge_raddr_clken;
@@ -151,7 +180,7 @@ always_ff @(posedge clk) begin
             r_state <= EDGE_WAIT_CENTER;
         
         EDGE_WAIT_CENTER:
-            if (exit_valid) begin
+            if (w_exit_valid) begin
                 r_state <= EDGE_ADDR0;
             end else if (r_sts_num_active == '0) begin
                 r_state <= IDLE;
@@ -221,8 +250,36 @@ always_ff @(posedge clk) begin
 end
 assign sts_fsm_state = r_sts_fsm_state;
 
-assign w_exit_ready = (r_state == EDGE_WAIT_CENTER);
-assign w_exit_acpt = exit_valid & w_exit_ready;
+// read queue
+wire w_rdque_wr_en;
+logic r_rdque_full;
+logic[BUFF_ADDR_WIDTH-1:0] r_rdque_wrptr;
+always_ff @(posedge clk) begin
+    if (!rstn) begin
+        r_rdque_wrptr <= '0;
+        r_rdque_full <= '0;
+    end else if (r_state == EDGE_INIT) begin
+        r_rdque_wrptr <= ctl_rdque_rdptr;
+        r_rdque_full <= '0;
+    end else begin
+        reg[BUFF_ADDR_WIDTH-1:0] v_wrptr_next_1;
+        reg[BUFF_ADDR_WIDTH-1:0] v_wrptr_next_2;
+        reg v_full;
+        v_wrptr_next_1 = r_rdque_wrptr + 'd1;
+        v_wrptr_next_2 = r_rdque_wrptr + 'd2;
+        v_full = (ctl_rdque_rdptr == v_wrptr_next_1) || (ctl_rdque_rdptr == v_wrptr_next_2);
+        if (!v_full && w_rdque_wr_en) begin
+            r_rdque_wrptr <= v_wrptr_next_2;
+        end
+        r_rdque_full <= v_full;
+    end
+end
+assign ctl_rdque_wrptr = r_rdque_wrptr;
+
+// exit queue arbitration
+assign w_exit_ready = (r_state == EDGE_WAIT_CENTER) && !r_rdque_full;
+assign w_exit_valid = exit_valid & ~r_rdque_full;
+assign w_exit_acpt = w_exit_valid & w_exit_ready;
 assign exit_ready = w_exit_ready;
 
 // coordinate latch
@@ -441,13 +498,10 @@ always_ff @(posedge clk) begin
             endcase
             
             if (r_edge_trig != '0) begin
-                r_edge_wdata <= 32'd1 << PIX_FLAG_HANDLED;
+                r_edge_wdata <= f_make_word_data('1, '0, '0);
                 r_edge_wlast <= '0;
             end else begin
-                r_edge_wdata <= '0;
-                r_edge_wdata[PIX_FLAG_HANDLED] <= '1;
-                r_edge_wdata[PIX_FLAG_FINISHED] <= '1;
-                r_edge_wdata[CWIDTH-1:0] <= r_count;
+                r_edge_wdata <= f_make_word_data('1, '1, r_count);
                 r_edge_wlast <= '1;
             end
             
@@ -457,6 +511,23 @@ always_ff @(posedge clk) begin
         r_edge_wlast <= '0;
         r_edge_wvalid <= '0;
     end
+end
+
+wire w_edge_write_acpt = (r_state == EDGE_WRITE) && (r_edge_trig != '0) && w_edge_wr_clken;
+logic[PWIDTH-1:0] w_edge_write_x;
+logic[PWIDTH-1:0] w_edge_write_y;
+always_comb begin
+    casex(r_edge_trig)
+    8'bxxxxxxx1: begin w_edge_write_y = r_edge_y - 'd1; w_edge_write_x = r_edge_x - 'd1; end
+    8'bxxxxxx10: begin w_edge_write_y = r_edge_y - 'd1; w_edge_write_x = r_edge_x      ; end
+    8'bxxxxx100: begin w_edge_write_y = r_edge_y - 'd1; w_edge_write_x = r_edge_x + 'd1; end
+    8'bxxxx1000: begin w_edge_write_y = r_edge_y      ; w_edge_write_x = r_edge_x - 'd1; end
+    8'bxxx10000: begin w_edge_write_y = r_edge_y      ; w_edge_write_x = r_edge_x + 'd1; end
+    8'bxx100000: begin w_edge_write_y = r_edge_y + 'd1; w_edge_write_x = r_edge_x - 'd1; end
+    8'bx1000000: begin w_edge_write_y = r_edge_y + 'd1; w_edge_write_x = r_edge_x      ; end
+    8'b10000000: begin w_edge_write_y = r_edge_y + 'd1; w_edge_write_x = r_edge_x + 'd1; end
+    default:     begin w_edge_write_y = r_edge_y      ; w_edge_write_x = r_edge_x      ; end
+    endcase
 end
 
 // coordinate latch
@@ -478,10 +549,10 @@ always_ff @(posedge clk) begin
             r_rect_x <= '0;
             r_rect_y <= r_rect_y + 'd1;
             r_rect_x_last <= (ctl_rect_width == 'd1);
-            r_rect_y_last <= (r_rect_y + 'd2 >= ctl_rect_height);
+            r_rect_y_last <= (r_rect_y + 'd1 >= ctl_rect_height);
         end else begin
             r_rect_x <= r_rect_x + 'd1;
-            r_rect_x_last <= (r_rect_x + 'd2 >= ctl_rect_width);
+            r_rect_x_last <= (r_rect_x + 'd1 >= ctl_rect_width);
         end
     end
 end
@@ -571,7 +642,9 @@ assign w_wdata = r_edge_wvalid ? r_edge_wdata : r_rect_wdata;
 wire[AXI_STRB_WIDTH-1:0] w_strb_lsb = 'h000f;
 assign w_wstrb = w_strb_lsb << (w_awaddr % AXI_STRB_WIDTH);
 assign w_wvalid = (r_edge_wvalid | r_rect_wvalid) & w_awready;
+wire[AXI_STRB_WIDTH-1:0] w_wram_wstrb;
 wire[31:0] w_wram_wdata;
+wire w_wram_wvalid;
 accelbrot_com_axi_slice #(
     .DATA_WIDTH(32+AXI_STRB_WIDTH)
 ) u_slice_w (
@@ -580,10 +653,12 @@ accelbrot_com_axi_slice #(
     .in_data    ({w_wstrb, w_wdata}), // input [DATA_WIDTH-1:0]
     .in_valid   (w_wvalid       ), // input
     .in_ready   (w_wready       ), // output
-    .out_data   ({wram_wstrb, w_wram_wdata}), // output[DATA_WIDTH-1:0]
-    .out_valid  (wram_wvalid    ), // output
+    .out_data   ({w_wram_wstrb, w_wram_wdata}), // output[DATA_WIDTH-1:0]
+    .out_valid  (w_wram_wvalid  ), // output
     .out_ready  (wram_wready    )  // input
 );
+assign wram_wvalid = w_wram_wvalid;
+assign wram_wstrb = w_wram_wstrb;
 assign wram_wdata = {PIX_PER_WORD{w_wram_wdata}};
 assign wram_wlast = '1;
 
@@ -621,7 +696,7 @@ accelbrot_com_reg_fifo #(
 assign w_wram_rdata = wram_rdata >> (w_ralign * 32);
 
 logic[15:0] r_read_outstanding;
-logic[13:0] r_read_index;
+logic[BUFF_ADDR_WIDTH-1:0] r_read_index;
 always @(posedge clk) begin
     if (!rstn) begin
         r_read_outstanding <= '0;
@@ -643,19 +718,80 @@ always @(posedge clk) begin
     end
 end
 
+wire w_rdque_wr_en_exited = w_cmd_flags_rdque_ena && (r_state == EDGE_WAIT_CENTER) && w_exit_acpt;
+wire w_rdque_wr_en_queued = w_cmd_flags_rdque_ena && w_edge_write_acpt;
+assign w_rdque_wr_en = w_rdque_wr_en_exited | w_rdque_wr_en_queued;
+
+logic r_rbuff_wr_en_l;
+logic r_rbuff_wr_en_h;
+logic[BUFF_ADDR_WIDTH-2:0] r_rbuff_wr_addr;
+logic[31:0] r_rbuff_wr_data_l;
+logic[31:0] r_rbuff_wr_data_h;
+always @(posedge clk) begin
+    if (!rstn) begin
+        r_rbuff_wr_en_l     <= '0;
+        r_rbuff_wr_en_h     <= '0;
+        r_rbuff_wr_addr     <= '0;
+        r_rbuff_wr_data_l   <= '0;
+        r_rbuff_wr_data_h   <= '0;
+    end else if (w_rdque_wr_en_exited) begin
+        r_rbuff_wr_en_l     <= '1;
+        r_rbuff_wr_en_h     <= '1;
+        r_rbuff_wr_addr     <= r_rdque_wrptr[BUFF_ADDR_WIDTH-1:1];
+        r_rbuff_wr_data_l   <= f_make_word_data('1, '1, exit_count);
+        r_rbuff_wr_data_h   <= '0;
+        r_rbuff_wr_data_h[PWIDTH-1:0]       <= exit_tag[0+:PWIDTH];
+        r_rbuff_wr_data_h[16+PWIDTH-1:16]   <= exit_tag[PWIDTH+:PWIDTH];
+    end else if (w_rdque_wr_en_queued) begin
+        r_rbuff_wr_en_l     <= '1;
+        r_rbuff_wr_en_h     <= '1;
+        r_rbuff_wr_addr     <= r_rdque_wrptr[BUFF_ADDR_WIDTH-1:1];
+        r_rbuff_wr_data_l   <= f_make_word_data('1, '0, '0);
+        r_rbuff_wr_data_h   <= '0;
+        r_rbuff_wr_data_h[PWIDTH-1:0]       <= w_edge_write_x;
+        r_rbuff_wr_data_h[16+PWIDTH-1:16]   <= w_edge_write_y;
+    end else if ((r_state == RECT_ACCESS || r_state == RECT_READ_WAIT) && w_racpt) begin
+        r_rbuff_wr_en_l     <= ~r_read_index[0];
+        r_rbuff_wr_en_h     <=  r_read_index[0];
+        r_rbuff_wr_addr     <= r_read_index[BUFF_ADDR_WIDTH-1:1];
+        r_rbuff_wr_data_l   <= w_wram_rdata;
+        r_rbuff_wr_data_h   <= w_wram_rdata;
+    end else begin
+        r_rbuff_wr_en_l <= '0;
+        r_rbuff_wr_en_h <= '0;
+    end
+end
+
+wire[BUFF_ADDR_WIDTH-2:0] w_rbuff_rd_addr = buff_addr[BUFF_ADDR_WIDTH-1:1];
+wire[31:0] w_rbuff_rd_data_l;
+wire[31:0] w_rbuff_rd_data_h;
 accelbrot_com_ram_sdp #(
-    .DATA_WIDTH(32              ),
-    .ADDR_WIDTH(BUFF_ADDR_WIDTH )
-) u_read_buff (
-    .wr_clk (clk            ), // input
-    .wr_en  (w_racpt        ), // input
-    .wr_addr(r_read_index   ), // input [ADDR_WIDTH-1:0]
-    .wr_data(w_wram_rdata   ), // input [DATA_WIDTH-1:0]
-    .rd_clk (clk            ), // input
-    .rd_en  ('1             ), // input
-    .rd_addr(buff_addr      ), // input [ADDR_WIDTH-1:0]
-    .rd_data(buff_rd_data   )  // output[DATA_WIDTH-1:0]
+    .DATA_WIDTH(32                  ),
+    .ADDR_WIDTH(BUFF_ADDR_WIDTH-1   )
+) u_read_buff_l (
+    .wr_clk (clk                ), // input
+    .wr_en  (r_rbuff_wr_en_l    ), // input
+    .wr_addr(r_rbuff_wr_addr    ), // input [ADDR_WIDTH-1:0]
+    .wr_data(r_rbuff_wr_data_l  ), // input [DATA_WIDTH-1:0]
+    .rd_clk (clk                ), // input
+    .rd_en  ('1                 ), // input
+    .rd_addr(w_rbuff_rd_addr    ), // input [ADDR_WIDTH-1:0]
+    .rd_data(w_rbuff_rd_data_l  )  // output[DATA_WIDTH-1:0]
 );
+accelbrot_com_ram_sdp #(
+    .DATA_WIDTH(32                  ),
+    .ADDR_WIDTH(BUFF_ADDR_WIDTH-1   )
+) u_read_buff_h (
+    .wr_clk (clk                ), // input
+    .wr_en  (r_rbuff_wr_en_h    ), // input
+    .wr_addr(r_rbuff_wr_addr    ), // input [ADDR_WIDTH-1:0]
+    .wr_data(r_rbuff_wr_data_h  ), // input [DATA_WIDTH-1:0]
+    .rd_clk (clk                ), // input
+    .rd_en  ('1                 ), // input
+    .rd_addr(w_rbuff_rd_addr    ), // input [ADDR_WIDTH-1:0]
+    .rd_data(w_rbuff_rd_data_h  )  // output[DATA_WIDTH-1:0]
+);
+assign buff_rd_data = buff_addr[0] == 1'b0 ? w_rbuff_rd_data_l : w_rbuff_rd_data_h;
 
 logic r_buff_rd_en;
 logic r_buff_rd_ack;
@@ -696,18 +832,10 @@ always @(posedge clk) begin
         r_push_x <= '0;
         r_push_y <= '0;
         r_push_valid <= '0;
-    end else if (r_state == EDGE_WRITE && w_edge_wr_clken) begin
-        casex(r_edge_trig)
-        8'bxxxxxxx1: begin r_push_y <= r_edge_y - 'd1; r_push_x <= r_edge_x - 'd1; end
-        8'bxxxxxx10: begin r_push_y <= r_edge_y - 'd1; r_push_x <= r_edge_x      ; end
-        8'bxxxxx100: begin r_push_y <= r_edge_y - 'd1; r_push_x <= r_edge_x + 'd1; end
-        8'bxxxx1000: begin r_push_y <= r_edge_y      ; r_push_x <= r_edge_x - 'd1; end
-        8'bxxx10000: begin r_push_y <= r_edge_y      ; r_push_x <= r_edge_x + 'd1; end
-        8'bxx100000: begin r_push_y <= r_edge_y + 'd1; r_push_x <= r_edge_x - 'd1; end
-        8'bx1000000: begin r_push_y <= r_edge_y + 'd1; r_push_x <= r_edge_x      ; end
-        8'b10000000: begin r_push_y <= r_edge_y + 'd1; r_push_x <= r_edge_x + 'd1; end
-        endcase
-        r_push_valid <= r_edge_trig != '0;
+    end else if (w_edge_write_acpt) begin
+        r_push_x <= w_edge_write_x;
+        r_push_y <= w_edge_write_y;
+        r_push_valid <= '1;
     end else if (r_state == RECT_ACCESS && w_rect_acs_clken) begin
         r_push_x <= ctl_rect_x + r_rect_x;
         r_push_y <= ctl_rect_y + r_rect_y;
@@ -727,7 +855,7 @@ always @(posedge clk) begin
     if (!rstn) begin
         r_sts_max_iter <= '0;
         r_sts_total_iter <= '0;
-    end else if (r_state == EDGE_INIT) begin
+    end else if (w_cmd_reset_cntr) begin
         r_sts_max_iter <= '0;
         r_sts_total_iter <= '0;
     end else begin
@@ -749,14 +877,50 @@ always @(posedge clk) begin
     if (!rstn) begin
         r_active_incr <= '0;
         r_active_decr <= '0;
+        r_sts_total_queued <= '0;
+        r_sts_total_exited <= '0;
+        r_sts_num_active <= '0;
+    end else if (w_cmd_reset_cntr) begin
+        r_sts_total_queued <= '0;
+        r_sts_total_exited <= '0;
         r_sts_num_active <= '0;
     end else begin
         r_active_incr <= r_push_valid & push_ready;
         r_active_decr <= r_edge_wlast & w_edge_wr_clken;
+        if (r_active_incr) begin
+            r_sts_total_queued <= r_sts_total_queued + 'd1;
+        end
+        if (r_active_decr) begin
+            r_sts_total_exited <= r_sts_total_exited + 'd1;
+        end
         if (r_active_incr && !r_active_decr) begin
             r_sts_num_active <= r_sts_num_active + 'd1;
         end else if (r_active_decr && !r_active_incr) begin
             r_sts_num_active <= r_sts_num_active - 'd1;
+        end
+    end
+end
+
+// wram access bytes
+always @(posedge clk) begin
+    if (!rstn) begin
+        r_sts_wram_wrbytes <= '0;
+        r_sts_wram_rdbytes <= '0;
+    end else begin
+        if (w_wready && w_wvalid) begin
+            reg[7:0] v_bytes;
+            v_bytes = 0;
+            for (int i = 0; i < AXI_STRB_WIDTH; i++) begin
+                if (w_wstrb[i]) v_bytes++;
+            end
+            r_sts_wram_wrbytes <= v_bytes;
+        end else begin
+            r_sts_wram_wrbytes <= '0;
+        end
+        if (w_racpt) begin
+            r_sts_wram_rdbytes <= 'd4;
+        end else begin
+            r_sts_wram_rdbytes <= '0;
         end
     end
 end

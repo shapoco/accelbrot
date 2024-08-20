@@ -27,8 +27,12 @@ module accelbrot_reg #(
     input   wire[31:0]                  sts_num_entered     ,
     input   wire[31:0]                  sts_num_running     ,
     input   wire[31:0]                  sts_num_exited      ,
+    input   wire[31:0]                  sts_total_queued    ,
+    input   wire[31:0]                  sts_total_exited    ,
     input   wire[CWIDTH-1:0]            sts_max_iter        ,
     input   wire[CWIDTH+PWIDTH*2-1:0]   sts_total_iter      ,
+    input   wire[7:0]                   sts_wram_wrbytes    ,
+    input   wire[7:0]                   sts_wram_rdbytes    ,
     output  wire[7:0]                   ctl_command         ,
     output  wire                        ctl_soft_reset      ,
     output  wire[AXI_ADDR_WIDTH-1:0]    ctl_img_addr        ,
@@ -46,6 +50,8 @@ module accelbrot_reg #(
     output  wire[PWIDTH-1:0]            ctl_rect_height     ,
     output  wire[31:0]                  ctl_rect_value      ,
     output  wire[31:0]                  ctl_cmd_flags       ,
+    input   wire[BUFF_ADDR_WIDTH-1:0]   ctl_rdque_wrptr     ,
+    output  wire[BUFF_ADDR_WIDTH-1:0]   ctl_rdque_rdptr     ,
     output  wire[BUFF_ADDR_WIDTH-1:0]   buff_addr           ,
     output  wire                        buff_rd_en          ,
     input   wire[31:0]                  buff_rd_data        ,
@@ -54,7 +60,7 @@ module accelbrot_reg #(
 
 localparam int ABWIDTH = ((BWIDTH + 31) / 32) * 32;
 
-localparam[31:0] VERSION = 32'h23072300;
+localparam[31:0] VERSION = 32'h24082000;
 localparam[31:0] PRSEED = 32'h00000006;
 
 localparam[15:0] PRM_VERSION        = 16'h0000;
@@ -73,9 +79,16 @@ localparam[15:0] STS_NUM_QUEUED     = 16'h0134;
 localparam[15:0] STS_NUM_ENTERED    = 16'h0138;
 localparam[15:0] STS_NUM_RUNNING    = 16'h0140;
 localparam[15:0] STS_NUM_EXITED     = 16'h0144;
+localparam[15:0] STS_TOTAL_QUEUED   = 16'h0150;
+localparam[15:0] STS_TOTAL_EXITED   = 16'h0158;
 localparam[15:0] STS_MAX_ITER       = 16'h0160;
 localparam[15:0] STS_TOTAL_ITER_L   = 16'h0168;
 localparam[15:0] STS_TOTAL_ITER_H   = 16'h016C;
+localparam[15:0] STS_CLK_CNTR_L     = 16'h0170;
+localparam[15:0] STS_CLK_CNTR_H     = 16'h0174;
+localparam[15:0] STS_WRAM_WRBYTES   = 16'h0180;
+localparam[15:0] STS_WRAM_RDBYTES   = 16'h0188;
+
 localparam[15:0] CTL_SOFT_RESET     = 16'h0400;
 localparam[15:0] CTL_COMMAND        = 16'h0410;
 localparam[15:0] CTL_IMG_ADDR_L     = 16'h0420;
@@ -96,7 +109,10 @@ localparam[15:0] CTL_RECT_WIDTH     = 16'h0608;
 localparam[15:0] CTL_RECT_HEIGHT    = 16'h060c;
 localparam[15:0] CTL_RECT_VALUE     = 16'h0610;
 localparam[15:0] CTL_CMD_FLAGS      = 16'h0614;
-localparam[15:0] BUFF_BASE          = 16'h4000;
+localparam[15:0] CTL_RDQUE_WRPTR    = 16'h0700;
+localparam[15:0] CTL_RDQUE_RDPTR    = 16'h0704;
+localparam[15:0] BUFF_BASE          = 16'h8000;
+
 
 logic[7:0]                  r_sts_fsm_state     ;
 logic[31:0]                 r_sts_axi_state     ;
@@ -105,26 +121,32 @@ logic[31:0]                 r_sts_num_queued    ;
 logic[31:0]                 r_sts_num_entered   ;
 logic[31:0]                 r_sts_num_running   ;
 logic[31:0]                 r_sts_num_exited    ;
+logic[31:0]                 r_sts_total_queued  ;
+logic[31:0]                 r_sts_total_exited  ;
 logic[CWIDTH-1:0]           r_sts_max_iter      ;
 logic[CWIDTH+PWIDTH*2-1:0]  r_sts_total_iter    ;
+logic[63:0]                 r_sts_clk_cntr      ;
+logic[31:0]                 r_sts_wram_wrbytes  ;
+logic[31:0]                 r_sts_wram_rdbytes  ;
 
-logic               r_ctl_soft_reset    ;
-logic[7:0]          r_ctl_command       ;
-logic[63:0]         r_ctl_img_addr      ;
-logic[PWIDTH-1:0]   r_ctl_img_width     ;
-logic[PWIDTH-1:0]   r_ctl_img_height    ;
-logic[15:0]         r_ctl_img_stride    ;
-logic[ABWIDTH-1:0]  r_ctl_a_offset      ;
-logic[ABWIDTH-1:0]  r_ctl_b_offset      ;
-logic[ABWIDTH-1:0]  r_ctl_a_step_x      ;
-logic[ABWIDTH-1:0]  r_ctl_b_step_y      ;
-logic[CWIDTH-1:0]   r_ctl_max_iter      ;
-logic[PWIDTH-1:0]   r_ctl_rect_x        ;
-logic[PWIDTH-1:0]   r_ctl_rect_y        ;
-logic[PWIDTH-1:0]   r_ctl_rect_width    ;
-logic[PWIDTH-1:0]   r_ctl_rect_height   ;
-logic[31:0]         r_ctl_rect_value    ;
-logic[31:0]         r_ctl_cmd_flags     ;
+logic                       r_ctl_soft_reset    ;
+logic[7:0]                  r_ctl_command       ;
+logic[63:0]                 r_ctl_img_addr      ;
+logic[PWIDTH-1:0]           r_ctl_img_width     ;
+logic[PWIDTH-1:0]           r_ctl_img_height    ;
+logic[15:0]                 r_ctl_img_stride    ;
+logic[ABWIDTH-1:0]          r_ctl_a_offset      ;
+logic[ABWIDTH-1:0]          r_ctl_b_offset      ;
+logic[ABWIDTH-1:0]          r_ctl_a_step_x      ;
+logic[ABWIDTH-1:0]          r_ctl_b_step_y      ;
+logic[CWIDTH-1:0]           r_ctl_max_iter      ;
+logic[PWIDTH-1:0]           r_ctl_rect_x        ;
+logic[PWIDTH-1:0]           r_ctl_rect_y        ;
+logic[PWIDTH-1:0]           r_ctl_rect_width    ;
+logic[PWIDTH-1:0]           r_ctl_rect_height   ;
+logic[31:0]                 r_ctl_rect_value    ;
+logic[31:0]                 r_ctl_cmd_flags     ;
+logic[BUFF_ADDR_WIDTH-1:0]  r_ctl_rdque_rdptr   ;
 
 assign ctl_soft_reset   = r_ctl_soft_reset  ;
 assign ctl_command      = r_ctl_command     ;
@@ -143,6 +165,16 @@ assign ctl_rect_width   = r_ctl_rect_width  ;
 assign ctl_rect_height  = r_ctl_rect_height ;
 assign ctl_rect_value   = r_ctl_rect_value  ;
 assign ctl_cmd_flags    = r_ctl_cmd_flags   ;
+assign ctl_rdque_rdptr  = r_ctl_rdque_rdptr ;
+
+logic[63:0] r_clk_cntr;
+always_ff @(posedge clk) begin
+    if (!rstn) begin
+        r_clk_cntr <= '0;
+    end else begin
+        r_clk_cntr <= r_clk_cntr + 'd1;
+    end
+end
 
 logic[15:0] r_addr;
 logic       r_reg_wr_en;
@@ -168,10 +200,14 @@ assign buff_addr = (r_addr - BUFF_BASE) >> 2;
 assign buff_rd_en = r_buff_rd_en;
 
 // write only registers
+logic[31:0] r_wram_wrbytes_accum;
+logic[31:0] r_wram_rdbytes_accum;
 always_ff @(posedge clk) begin
     if (!rstn) begin
         r_ctl_soft_reset <= '0;
         r_ctl_command <= '0;
+        r_wram_wrbytes_accum <= '0;
+        r_wram_rdbytes_accum <= '0;
         r_sts_fsm_state     <= '0;
         r_sts_axi_state     <= '0;
         r_sts_num_active    <= '0;
@@ -179,10 +215,18 @@ always_ff @(posedge clk) begin
         r_sts_num_entered   <= '0;
         r_sts_num_running   <= '0;
         r_sts_num_exited    <= '0;
+        r_sts_total_exited  <= '0;
+        r_sts_total_queued  <= '0;
         r_sts_max_iter      <= '0;
         r_sts_total_iter    <= '0;
-
+        r_sts_clk_cntr      <= '0;
+        r_sts_wram_wrbytes  <= '0;
+        r_sts_wram_rdbytes  <= '0;
     end else begin
+        reg[31:0] v_wram_wrbytes;
+        reg[31:0] v_wram_rdbytes;
+        v_wram_wrbytes = r_wram_wrbytes_accum;
+        v_wram_rdbytes = r_wram_rdbytes_accum;
         r_ctl_soft_reset <= (r_reg_wr_en && r_addr == CTL_SOFT_RESET) ? r_wr_data[0] : '0;
         r_ctl_command <= (r_reg_wr_en && r_addr == CTL_COMMAND) ? r_wr_data[7:0] : '0;
         if (r_reg_wr_en && r_addr == STS_LATCH && r_wr_data[0]) begin
@@ -193,9 +237,18 @@ always_ff @(posedge clk) begin
             r_sts_num_entered   <= sts_num_entered  ;
             r_sts_num_running   <= sts_num_running  ;
             r_sts_num_exited    <= sts_num_exited   ;
+            r_sts_total_queued  <= sts_total_queued ;
+            r_sts_total_exited  <= sts_total_exited ;
             r_sts_max_iter      <= sts_max_iter     ;
             r_sts_total_iter    <= sts_total_iter   ;
+            r_sts_clk_cntr      <= r_clk_cntr       ;
+            r_sts_wram_wrbytes  <= v_wram_wrbytes   ;
+            r_sts_wram_rdbytes  <= v_wram_rdbytes   ;
+            v_wram_wrbytes = 0;
+            v_wram_rdbytes = 0;
         end
+        r_wram_wrbytes_accum <= v_wram_wrbytes + sts_wram_wrbytes;
+        r_wram_rdbytes_accum <= v_wram_rdbytes + sts_wram_rdbytes;
     end
 end
 
@@ -217,6 +270,7 @@ always_ff @(posedge clk) begin
         r_ctl_rect_height   <= '0;
         r_ctl_rect_value    <= '0;
         r_ctl_cmd_flags     <= '0;
+        r_ctl_rdque_rdptr   <= '0;
     end else if (r_reg_wr_en) begin
         if (r_addr < BUFF_BASE) begin
             case (r_addr)
@@ -236,6 +290,7 @@ always_ff @(posedge clk) begin
             CTL_RECT_HEIGHT : r_ctl_rect_height <= r_wr_data;
             CTL_RECT_VALUE  : r_ctl_rect_value  <= r_wr_data;
             CTL_CMD_FLAGS   : r_ctl_cmd_flags   <= r_wr_data;
+            CTL_RDQUE_RDPTR : r_ctl_rdque_rdptr <= r_wr_data;
             endcase
         end
     end
@@ -265,9 +320,15 @@ always_ff @(posedge clk) begin
         STS_NUM_ENTERED : r_rd_data <= r_sts_num_entered;
         STS_NUM_RUNNING : r_rd_data <= r_sts_num_running;
         STS_NUM_EXITED  : r_rd_data <= r_sts_num_exited;
+        STS_TOTAL_QUEUED: r_rd_data <= r_sts_total_queued;
+        STS_TOTAL_EXITED: r_rd_data <= r_sts_total_exited;
         STS_MAX_ITER    : r_rd_data <= r_sts_max_iter;
         STS_TOTAL_ITER_L: r_rd_data <= r_sts_total_iter[31:0];
         STS_TOTAL_ITER_H: r_rd_data <= r_sts_total_iter[CWIDTH+PWIDTH*2-1:32];
+        STS_CLK_CNTR_L  : r_rd_data <= r_sts_clk_cntr[31:0];
+        STS_CLK_CNTR_H  : r_rd_data <= r_sts_clk_cntr[63:32];
+        STS_WRAM_WRBYTES: r_rd_data <= r_sts_wram_wrbytes;
+        STS_WRAM_RDBYTES: r_rd_data <= r_sts_wram_rdbytes;
         CTL_IMG_ADDR_L  : r_rd_data <= r_ctl_img_addr[31:0];
         CTL_IMG_ADDR_H  : r_rd_data <= r_ctl_img_addr[63:32];
         CTL_IMG_WIDTH   : r_rd_data <= r_ctl_img_width  ;
@@ -284,6 +345,8 @@ always_ff @(posedge clk) begin
         CTL_RECT_HEIGHT : r_rd_data <= r_ctl_rect_height;
         CTL_RECT_VALUE  : r_rd_data <= r_ctl_rect_value ;
         CTL_CMD_FLAGS   : r_rd_data <= r_ctl_cmd_flags  ;
+        CTL_RDQUE_WRPTR : r_rd_data <= ctl_rdque_wrptr  ;
+        CTL_RDQUE_RDPTR : r_rd_data <= r_ctl_rdque_rdptr;
         default         : r_rd_data <= '0;
         endcase
         r_rd_ack <= '1;
