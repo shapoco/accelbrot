@@ -10,7 +10,7 @@ module accelbrot_fsm #(
     parameter int QDEPTH = 16 * 1024,
     parameter int AXI_ADDR_WIDTH = 32,
     parameter int AXI_DATA_WIDTH = 128,
-    parameter int BUFF_ADDR_WIDTH = 14,
+    parameter int BUFF_ADDR_WIDTH = 15,
     parameter int AXI_STRB_WIDTH = AXI_DATA_WIDTH / 8,
     parameter int BWIDTH = NWORDS * WWIDTH,
     parameter int TWIDTH = PWIDTH * 2
@@ -159,6 +159,8 @@ logic r_rect_y_last;
 
 logic r_read_busy;
 
+logic r_rdque_afull;
+
 state_t r_state;
 always_ff @(posedge clk) begin
     if (!rstn) begin
@@ -250,35 +252,9 @@ always_ff @(posedge clk) begin
 end
 assign sts_fsm_state = r_sts_fsm_state;
 
-// read queue
-wire w_rdque_wr_en;
-logic r_rdque_full;
-logic[BUFF_ADDR_WIDTH-1:0] r_rdque_wrptr;
-always_ff @(posedge clk) begin
-    if (!rstn) begin
-        r_rdque_wrptr <= '0;
-        r_rdque_full <= '0;
-    end else if (r_state == EDGE_INIT) begin
-        r_rdque_wrptr <= ctl_rdque_rdptr;
-        r_rdque_full <= '0;
-    end else begin
-        reg[BUFF_ADDR_WIDTH-1:0] v_wrptr_next_1;
-        reg[BUFF_ADDR_WIDTH-1:0] v_wrptr_next_2;
-        reg v_full;
-        v_wrptr_next_1 = r_rdque_wrptr + 'd1;
-        v_wrptr_next_2 = r_rdque_wrptr + 'd2;
-        v_full = (ctl_rdque_rdptr == v_wrptr_next_1) || (ctl_rdque_rdptr == v_wrptr_next_2);
-        if (!v_full && w_rdque_wr_en) begin
-            r_rdque_wrptr <= v_wrptr_next_2;
-        end
-        r_rdque_full <= v_full;
-    end
-end
-assign ctl_rdque_wrptr = r_rdque_wrptr;
-
 // exit queue arbitration
-assign w_exit_ready = (r_state == EDGE_WAIT_CENTER) && !r_rdque_full;
-assign w_exit_valid = exit_valid & ~r_rdque_full;
+assign w_exit_ready = (r_state == EDGE_WAIT_CENTER) && !r_rdque_afull;
+assign w_exit_valid = exit_valid & ~r_rdque_afull;
 assign w_exit_acpt = w_exit_valid & w_exit_ready;
 assign exit_ready = w_exit_ready;
 
@@ -513,7 +489,6 @@ always_ff @(posedge clk) begin
     end
 end
 
-wire w_edge_write_acpt = (r_state == EDGE_WRITE) && (r_edge_trig != '0) && w_edge_wr_clken;
 logic[PWIDTH-1:0] w_edge_write_x;
 logic[PWIDTH-1:0] w_edge_write_y;
 always_comb begin
@@ -718,9 +693,30 @@ always @(posedge clk) begin
     end
 end
 
-wire w_rdque_wr_en_exited = w_cmd_flags_rdque_ena && (r_state == EDGE_WAIT_CENTER) && w_exit_acpt;
-wire w_rdque_wr_en_queued = w_cmd_flags_rdque_ena && w_edge_write_acpt;
-assign w_rdque_wr_en = w_rdque_wr_en_exited | w_rdque_wr_en_queued;
+wire w_rdque_wr_en = w_cmd_flags_rdque_ena & r_edge_wvalid;
+
+logic[BUFF_ADDR_WIDTH-1:0] r_rdque_wrptr;
+always @(posedge clk) begin
+    if (!rstn) begin
+        r_rdque_wrptr <= '0;
+        r_rdque_afull <= '0;
+    end else if (r_state == EDGE_INIT) begin
+        r_rdque_wrptr <= ctl_rdque_rdptr;
+        r_rdque_afull <= '0;
+    end else begin
+        reg[BUFF_ADDR_WIDTH-1:0] v_free;
+        reg v_afull;
+        v_free = ctl_rdque_rdptr - r_rdque_wrptr - 'd1;
+        v_afull = (v_free < 16) ? '1 : '0;
+        if (w_rdque_wr_en) begin
+            if (v_free == 2) $display("*WARNING: Queue Full");
+            if (v_free < 2) $display("*FATAL: Queue Overflow");
+            r_rdque_wrptr <= r_rdque_wrptr + 'd2;
+        end
+        r_rdque_afull <= v_afull;
+    end
+end
+assign ctl_rdque_wrptr = r_rdque_wrptr;
 
 logic r_rbuff_wr_en_l;
 logic r_rbuff_wr_en_h;
@@ -734,19 +730,11 @@ always @(posedge clk) begin
         r_rbuff_wr_addr     <= '0;
         r_rbuff_wr_data_l   <= '0;
         r_rbuff_wr_data_h   <= '0;
-    end else if (w_rdque_wr_en_exited) begin
+    end else if (w_rdque_wr_en) begin
         r_rbuff_wr_en_l     <= '1;
         r_rbuff_wr_en_h     <= '1;
         r_rbuff_wr_addr     <= r_rdque_wrptr[BUFF_ADDR_WIDTH-1:1];
-        r_rbuff_wr_data_l   <= f_make_word_data('1, '1, exit_count);
-        r_rbuff_wr_data_h   <= '0;
-        r_rbuff_wr_data_h[PWIDTH-1:0]       <= exit_tag[0+:PWIDTH];
-        r_rbuff_wr_data_h[16+PWIDTH-1:16]   <= exit_tag[PWIDTH+:PWIDTH];
-    end else if (w_rdque_wr_en_queued) begin
-        r_rbuff_wr_en_l     <= '1;
-        r_rbuff_wr_en_h     <= '1;
-        r_rbuff_wr_addr     <= r_rdque_wrptr[BUFF_ADDR_WIDTH-1:1];
-        r_rbuff_wr_data_l   <= f_make_word_data('1, '0, '0);
+        r_rbuff_wr_data_l   <= r_edge_wdata;
         r_rbuff_wr_data_h   <= '0;
         r_rbuff_wr_data_h[PWIDTH-1:0]       <= w_edge_write_x;
         r_rbuff_wr_data_h[16+PWIDTH-1:16]   <= w_edge_write_y;
@@ -832,10 +820,10 @@ always @(posedge clk) begin
         r_push_x <= '0;
         r_push_y <= '0;
         r_push_valid <= '0;
-    end else if (w_edge_write_acpt) begin
+    end else if (r_state == EDGE_WRITE && w_edge_wr_clken) begin
         r_push_x <= w_edge_write_x;
         r_push_y <= w_edge_write_y;
-        r_push_valid <= '1;
+        r_push_valid <= (r_edge_trig != '0);
     end else if (r_state == RECT_ACCESS && w_rect_acs_clken) begin
         r_push_x <= ctl_rect_x + r_rect_x;
         r_push_y <= ctl_rect_y + r_rect_y;

@@ -12,7 +12,8 @@ module accelbrot #(
     parameter int AXI_DATA_WIDTH = 128,
     parameter int AXI_STRB_WIDTH = AXI_DATA_WIDTH / 8,
     parameter int BWIDTH = NWORDS * WWIDTH,
-    parameter int TWIDTH = PWIDTH * 2
+    parameter int TWIDTH = PWIDTH * 2,
+    parameter int BUFF_ADDR_WIDTH = 15
 ) (
     input   wire                    clk                 ,
     input   wire                    rstn                ,
@@ -58,8 +59,6 @@ localparam int SCAN_FLAG_PUSH_TASK  = 1;
 
 localparam int PIX_FLAG_HANDLED     = 31;
 localparam int PIX_FLAG_FINISHED    = 30;
-
-localparam int BUFF_ADDR_WIDTH = 15;
 
 typedef enum {
     RESET, IDLE, 

@@ -17,7 +17,8 @@ localparam int CWIDTH = 20;
 localparam int QDEPTH = 16 * 1024;
 localparam int CNTR_WIDTH = $clog2(NWORDS);
 
-localparam int BUFF_ADDR_WIDTH = 15;
+localparam int BUFF_ADDR_WIDTH = 8;
+localparam int BUFF_DEPTH = 1 << BUFF_ADDR_WIDTH;
 
 localparam int AXI_ADDR_WIDTH = 32;
 localparam int AXI_DATA_WIDTH = 128;
@@ -121,8 +122,12 @@ wire                    wram_bvalid ; // output
 wire                    wram_bready ; // input
 wire[1:0]               wram_bresp  ; // output
 
+logic[BUFF_ADDR_WIDTH-1:0] rdque_wrptr;
 logic[BUFF_ADDR_WIDTH-1:0] rdque_rdptr;
-initial rdque_rdptr = '0;
+initial begin
+    rdque_wrptr = '0;
+    rdque_rdptr = '0;
+end
 
 axi_ram #(
     .ADDR_WIDTH(AXI_ADDR_WIDTH),
@@ -165,7 +170,8 @@ accelbrot #(
     .PWIDTH(PWIDTH),
     .QDEPTH(QDEPTH),
     .AXI_ADDR_WIDTH(AXI_ADDR_WIDTH),
-    .AXI_DATA_WIDTH(AXI_DATA_WIDTH)
+    .AXI_DATA_WIDTH(AXI_DATA_WIDTH),
+    .BUFF_ADDR_WIDTH(BUFF_ADDR_WIDTH)
 ) dut (
     .*
 );
@@ -265,12 +271,10 @@ task write_param(
     end
 endtask
 
-real last_time;
-initial last_time = 0;
+bit[63:0] last_clk_cntr;
+initial last_clk_cntr = 0;
 
-`define NEW_REGS
-
-task show_stats();
+typedef struct packed {
     int unsigned active;
     int unsigned queued;
     int unsigned entered;
@@ -279,50 +283,56 @@ task show_stats();
     int unsigned total_queued;
     int unsigned total_exited;
     int unsigned max_iter;
-    int unsigned total_iter_l;
-    int unsigned total_iter_h;
-    int unsigned rdque_wrptr;
-    int unsigned rdque_size;
-    int unsigned clk_cntr_l;
-    int unsigned clk_cntr_h;
+    bit[63:0] total_iter;
+    int unsigned rdque_wrptr_u32;
+    bit[63:0] clk_cntr;
+    bit[63:0] clk_cntr_delta;
     int unsigned wram_wrbytes;
     int unsigned wram_rdbytes;
-    real curr_time;
-    real delta_time;
-    real wr_Mbyteps;
-    real rd_Mbyteps;
+    int unsigned clk_delta;
+} stats_t;
+
+task read_stats(output stats_t stats);
+    bit[63:0] delta_;
+    int unsigned tmp_l, tmp_h;
     reg_wr(STS_LATCH, 1, 0);
-    reg_rd(STS_NUM_ACTIVE   , active    , 0);
-    reg_rd(STS_NUM_QUEUED   , queued    , 0);
-    reg_rd(STS_NUM_ENTERED  , entered   , 0);
-    reg_rd(STS_NUM_RUNNING  , running   , 0);
-    reg_rd(STS_NUM_EXITED   , exited    , 0);
-    reg_rd(STS_MAX_ITER     , max_iter  , 0);
-    reg_rd(STS_TOTAL_ITER_L , total_iter_l, 0);
-    reg_rd(STS_TOTAL_ITER_H , total_iter_h, 0);
-`ifdef NEW_REGS
-    reg_rd(STS_TOTAL_QUEUED , total_queued, 0);
-    reg_rd(STS_TOTAL_EXITED , total_exited, 0);
-    reg_rd(STS_CLK_CNTR_L   , clk_cntr_l, 0);
-    reg_rd(STS_CLK_CNTR_H   , clk_cntr_h, 0);
-    reg_rd(STS_WRAM_WRBYTES , wram_wrbytes, 0);
-    reg_rd(STS_WRAM_RDBYTES , wram_rdbytes, 0);
-    reg_rd(CTL_RDQUE_WRPTR  , rdque_wrptr, 0);
-    rdque_size = rdque_wrptr - rdque_rdptr;
-    curr_time = real'({clk_cntr_h, clk_cntr_l}) / real'(SYS_CLK_FREQ);
-    delta_time = curr_time - last_time;
-    wr_Mbyteps = real'(wram_wrbytes) / 1000000.0 / delta_time;
-    rd_Mbyteps = real'(wram_rdbytes) / 1000000.0 / delta_time;
-    $display("act=%1d, que=%1d, entr=%1d, run=%1d, exit=%1d, tot_que=%1d, tot_exit=%1d, max_iter=%1d, total_iter=%1d, wram_wr=%.3fMB/s, wram_rd=%.3fMB/s, rdque_size=%1d",
-        active, queued, entered, running, exited, total_queued, total_exited, max_iter, {total_iter_h, total_iter_l}, wr_Mbyteps, rd_Mbyteps, rdque_size);
-    last_time = curr_time;
-`else
-    $display("active=%1d, queued=%1d, entered=%1d, running=%1d, exited=%1d, max_iter=%1d, total_iter=%1d",
-        active, queued, entered, running, exited, max_iter, {total_iter_h, total_iter_l});
-`endif
+    reg_rd(STS_NUM_ACTIVE   , stats.active      , 0);
+    reg_rd(STS_NUM_QUEUED   , stats.queued      , 0);
+    reg_rd(STS_NUM_ENTERED  , stats.entered     , 0);
+    reg_rd(STS_NUM_RUNNING  , stats.running     , 0);
+    reg_rd(STS_NUM_EXITED   , stats.exited      , 0);
+    reg_rd(STS_MAX_ITER     , stats.max_iter    , 0);
+    reg_rd(STS_TOTAL_ITER_L , tmp_l             , 0);
+    reg_rd(STS_TOTAL_ITER_H , tmp_h             , 0);
+    stats.total_iter = {tmp_h, tmp_l};
+    reg_rd(STS_TOTAL_QUEUED , stats.total_queued, 0);
+    reg_rd(STS_TOTAL_EXITED , stats.total_exited, 0);
+    reg_rd(STS_CLK_CNTR_L   , tmp_l             , 0);
+    reg_rd(STS_CLK_CNTR_H   , tmp_h             , 0);
+    stats.clk_cntr = {tmp_h, tmp_l};
+    stats.clk_cntr_delta = stats.clk_cntr - last_clk_cntr;
+    last_clk_cntr = stats.clk_cntr;
+    reg_rd(STS_WRAM_WRBYTES , stats.wram_wrbytes, 0);
+    reg_rd(STS_WRAM_RDBYTES , stats.wram_rdbytes, 0);
+endtask
+
+task print_stats(input stats_t stats);
+    real delta_time, wr_Mbyteps, rd_Mbyteps;
+    delta_time = real'(stats.clk_cntr_delta) / real'(SYS_CLK_FREQ);
+    wr_Mbyteps = real'(stats.wram_wrbytes) / 1000000.0 / delta_time;
+    rd_Mbyteps = real'(stats.wram_rdbytes) / 1000000.0 / delta_time;
+    $display("act=%1d, que=%1d, entr=%1d, run=%1d, exit=%1d, tot_que=%1d, tot_exit=%1d, max_iter=%1d, total_iter=%1d, wram_wr=%.3fMB/s, wram_rd=%.3fMB/s",
+        stats.active, stats.queued, stats.entered, stats.running, stats.exited, stats.total_queued, stats.total_exited, stats.max_iter, stats.total_iter, wr_Mbyteps, rd_Mbyteps);
+endtask
+
+task show_stats();
+    stats_t stats;
+    read_stats(stats);
+    print_stats(stats);
 endtask
 
 localparam int BASE_ADDR = 'h1000;
+//localparam int W = 64;
 localparam int W = 32;
 //localparam int W = 16;
 localparam int H = W / 2;
@@ -387,9 +397,20 @@ task clear_pop_buff();
     end
 endtask
 
+localparam int GUAGE_LENGTH = 64;
+
 task pop_queue();
-    int unsigned rdque_wrptr;
-    reg_rd(CTL_RDQUE_WRPTR, rdque_wrptr, 0);
+    stats_t stats;
+    int unsigned rdque_wrptr_u32;
+    bit[BUFF_ADDR_WIDTH-1:0] rdque_wrptr;
+    bit[BUFF_ADDR_WIDTH-1:0] rdque_size;
+    int guage_size;
+    read_stats(stats);
+    reg_rd(CTL_RDQUE_WRPTR  , rdque_wrptr_u32, 0);
+    rdque_wrptr = rdque_wrptr_u32[31:2];
+    rdque_size = rdque_wrptr - rdque_rdptr;
+    guage_size = int'(rdque_size) * GUAGE_LENGTH / BUFF_DEPTH;
+
     while (rdque_rdptr != rdque_wrptr) begin
         int unsigned data0, data1;
         int x, y;
@@ -401,7 +422,19 @@ task pop_queue();
         //pop_buff[y * W + x] = (1<<PIX_FLAG_HANDLED) | (1<<PIX_FLAG_FINISHED) | 1;
         rdque_rdptr += 2;
     end
-    reg_wr(CTL_RDQUE_RDPTR, rdque_rdptr, 0);
+    reg_wr(CTL_RDQUE_RDPTR, {rdque_rdptr, 2'b00}, 0);
+
+    $write("Read queue: [");
+    for (int i = 0; i < GUAGE_LENGTH; i++) begin
+        if (i < guage_size) begin
+            $write("#");
+        end else begin
+            $write("_");
+        end
+    end
+    $display("] %1d/%1d (%1d%%)", rdque_size, BUFF_DEPTH, rdque_size * 100 / BUFF_DEPTH);
+
+    print_stats(stats);
     for (int y = 0; y < H; y++) begin
         for (int x = 0; x < W; x++) begin
             print_pixel(pop_buff[y * W + x]);
@@ -471,15 +504,24 @@ initial begin
     show_state();
     
     do begin
-        show_stats();
-        if (USE_READ_QUEUE) pop_queue();
+        if (USE_READ_QUEUE) begin
+            pop_queue();
+            repeat(100) @(posedge clk);
+        end else begin
+            show_stats();
+            repeat(1000) @(posedge clk);
+        end
         //dump_from_dram();
-        repeat(1000) @(posedge clk);
         //show_state();
         reg_rd(STS_BUSY, busy, 0);
     end while (busy);
-    show_stats();
-    show_stats();
+    if (USE_READ_QUEUE) begin
+        pop_queue();
+        pop_queue();
+    end else begin
+        show_stats();
+        show_stats();
+    end
     if (USE_READ_QUEUE) pop_queue();
 
     $display("----------------------------------------------------------------");

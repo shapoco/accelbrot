@@ -8,7 +8,7 @@ module accelbrot_reg #(
     parameter int CWIDTH = 20,
     parameter int PWIDTH = 12,
     parameter int AXI_ADDR_WIDTH = 32,
-    parameter int BUFF_ADDR_WIDTH = 14,
+    parameter int BUFF_ADDR_WIDTH = 15,
     parameter int BWIDTH = NWORDS * WWIDTH
 ) (
     input   wire                        clk                 ,
@@ -298,7 +298,7 @@ always_ff @(posedge clk) begin
             CTL_RECT_HEIGHT : r_ctl_rect_height <= r_wr_data;
             CTL_RECT_VALUE  : r_ctl_rect_value  <= r_wr_data;
             CTL_CMD_FLAGS   : r_ctl_cmd_flags   <= r_wr_data;
-            CTL_RDQUE_RDPTR : r_ctl_rdque_rdptr <= r_wr_data;
+            CTL_RDQUE_RDPTR : r_ctl_rdque_rdptr <= r_wr_data[31:2];
             endcase
         end
     end
@@ -353,8 +353,8 @@ always_ff @(posedge clk) begin
         CTL_RECT_HEIGHT : r_rd_data <= r_ctl_rect_height;
         CTL_RECT_VALUE  : r_rd_data <= r_ctl_rect_value ;
         CTL_CMD_FLAGS   : r_rd_data <= r_ctl_cmd_flags  ;
-        CTL_RDQUE_WRPTR : r_rd_data <= ctl_rdque_wrptr  ;
-        CTL_RDQUE_RDPTR : r_rd_data <= r_ctl_rdque_rdptr;
+        CTL_RDQUE_WRPTR : r_rd_data <= {ctl_rdque_wrptr, 2'b00};
+        CTL_RDQUE_RDPTR : r_rd_data <= {r_ctl_rdque_rdptr, 2'b00};
         default         : r_rd_data <= '0;
         endcase
         r_rd_ack <= '1;
