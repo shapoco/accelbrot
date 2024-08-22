@@ -279,8 +279,7 @@ always @(posedge axi_clk) begin
     end else begin
         reg[31:0] v_period;
         r_led_busy <= w_mon_busy;
-        v_period = 'd100 + w_mon_num_active[31:];
-        v_period += w_mon_num_active >> 2;
+        v_period = 'd100 + (w_mon_num_active >> 2);
         if (v_period > 'd1000) v_period = 'd1000;
         r_act_blink_period_ms <= v_period;
         if (!w_mon_busy) begin
