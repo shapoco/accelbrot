@@ -8,7 +8,7 @@ module act_led(
     output  wire    led_out
 );
 
-localparam int BLINK_INTERVAL_HALF_MS = 50;
+localparam int BLINK_INTERVAL_HALF_MS = 25;
 
 logic[7:0] r_timer;
 logic[1:0] r_blink;

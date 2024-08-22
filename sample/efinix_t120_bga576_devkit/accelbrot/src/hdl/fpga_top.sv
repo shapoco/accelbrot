@@ -264,14 +264,6 @@ always @(posedge axi_clk) begin
     end
 end
 
-function[7:0] f_log2(input logic[31:0] val);
-    for (int i = 31; i >= 0; i--) begin
-        if (val[i]) return i;
-    end
-    return 'd0;
-endfunction
-
-logic[7:0] r_act_clog2;
 logic[15:0] r_act_blink_period_ms;
 logic[15:0] r_act_blink_cntr;
 logic r_led_busy;
@@ -279,16 +271,18 @@ logic r_led_act;
 logic r_led_rdque_full;
 always @(posedge axi_clk) begin
     if (!axi_rstn) begin
-        r_act_clog2 <= '0;
         r_act_blink_period_ms <= '0;
         r_act_blink_cntr <= '0;
         r_led_busy <= '0;
         r_led_act <= '0;
         r_led_rdque_full <= '0; 
     end else begin
+        reg[31:0] v_period;
         r_led_busy <= w_mon_busy;
-        r_act_clog2 <= f_log2(w_mon_num_active);
-        r_act_blink_period_ms <= 128 * r_act_clog2 + 'd128;
+        v_period = 'd100 + w_mon_num_active[31:];
+        v_period += w_mon_num_active >> 2;
+        if (v_period > 'd1000) v_period = 'd1000;
+        r_act_blink_period_ms <= v_period;
         if (!w_mon_busy) begin
             r_act_blink_cntr <= '0;
             r_led_act <= '0;
