@@ -60,7 +60,7 @@ module accelbrot_reg #(
 
 localparam int ABWIDTH = ((BWIDTH + 31) / 32) * 32;
 
-localparam[31:0] VERSION = 32'h24082000;
+localparam[31:0] VERSION = 32'h24082100;
 localparam[31:0] PRSEED = 32'h00000006;
 
 localparam[15:0] PRM_VERSION        = 16'h0000;
@@ -70,6 +70,9 @@ localparam[15:0] PRM_NWORDS         = 16'h0014;
 localparam[15:0] PRM_WWIDTH         = 16'h0018;
 localparam[15:0] PRM_IWIDTH         = 16'h001C;
 localparam[15:0] PRM_CWIDTH         = 16'h0020;
+localparam[15:0] PRM_BUFF_BASE      = 16'h00c0;
+localparam[15:0] PRM_BUFF_SIZE     = 16'h00c8;
+
 localparam[15:0] STS_BUSY           = 16'h0100;
 localparam[15:0] STS_LATCH          = 16'h0110;
 localparam[15:0] STS_FSM_STATE      = 16'h0120;
@@ -312,6 +315,7 @@ always_ff @(posedge clk) begin
         r_rd_data <= '0;
         r_rd_ack <= '0;
     end else if (r_reg_rd_en) begin
+        r_rd_data <= '0;
         case (r_addr)
         PRM_VERSION     : r_rd_data <= VERSION;
         PRM_PRSEED      : r_rd_data <= PRSEED;
@@ -320,6 +324,8 @@ always_ff @(posedge clk) begin
         PRM_WWIDTH      : r_rd_data <= WWIDTH;
         PRM_IWIDTH      : r_rd_data <= IWIDTH;
         PRM_CWIDTH      : r_rd_data <= CWIDTH;
+        PRM_BUFF_BASE   : r_rd_data <= BUFF_BASE;
+        PRM_BUFF_SIZE   : r_rd_data <= 32'd4 << BUFF_ADDR_WIDTH;
         STS_BUSY        : r_rd_data <= sts_busy;
         STS_FSM_STATE   : r_rd_data <= r_sts_fsm_state;
         STS_AXI_STATE   : r_rd_data <= r_sts_axi_state;

@@ -152,13 +152,14 @@ wire w_exit_acpt;
 wire w_edge_raddr_clken;
 wire w_edge_reading;
 wire w_edge_wr_clken;
+wire w_edge_wr_acpt;
 wire w_rect_acs_clken;
 
 logic r_edge_raddr_last;
 logic[7:0] r_edge_trig;
 
-logic r_rect_x_last;
-logic r_rect_y_last;
+logic r_rect_s0_x_last;
+logic r_rect_s0_y_last;
 
 logic r_read_busy;
 
@@ -219,7 +220,7 @@ always_ff @(posedge clk) begin
             r_state <= EDGE_WRITE;
         
         EDGE_WRITE:
-            if (r_edge_trig == '0) begin
+            if (r_edge_trig == '0 && w_edge_wr_clken) begin
                 r_state <= EDGE_WAIT_CENTER;
             end
             
@@ -229,7 +230,7 @@ always_ff @(posedge clk) begin
         RECT_ACCESS:
             if (r_cmd_abort) begin
                 r_state <= IDLE;
-            end else if (w_rect_acs_clken && r_rect_y_last && r_rect_x_last) begin
+            end else if (w_rect_acs_clken && r_rect_s0_y_last && r_rect_s0_x_last) begin
                 if (w_cmd_flags_write) begin
                     r_state <= IDLE;
                 end else begin
@@ -417,7 +418,7 @@ always_ff @(posedge clk) begin
     end else if (wram_rvalid) begin
         r_edge_nei[w_edge_rdata_idx] <= w_wram_rdata;
     end else if (r_state == EDGE_DETECT) begin
-        r_edge_det_u <= r_edge_nei[NEIGHBOR_UC][PIX_FLAG_FINISHED] && r_edge_nei[NEIGHBOR_UC][CWIDTH-1:0] != r_count;;
+        r_edge_det_u <= r_edge_nei[NEIGHBOR_UC][PIX_FLAG_FINISHED] && r_edge_nei[NEIGHBOR_UC][CWIDTH-1:0] != r_count;
         r_edge_det_d <= r_edge_nei[NEIGHBOR_DC][PIX_FLAG_FINISHED] && r_edge_nei[NEIGHBOR_DC][CWIDTH-1:0] != r_count;
         r_edge_det_l <= r_edge_nei[NEIGHBOR_ML][PIX_FLAG_FINISHED] && r_edge_nei[NEIGHBOR_ML][CWIDTH-1:0] != r_count;
         r_edge_det_r <= r_edge_nei[NEIGHBOR_MR][PIX_FLAG_FINISHED] && r_edge_nei[NEIGHBOR_MR][CWIDTH-1:0] != r_count;
@@ -524,59 +525,69 @@ always_comb begin
 end
 
 // coordinate latch
-logic[PWIDTH-1:0] r_rect_x;
-logic[PWIDTH-1:0] r_rect_y;
+logic r_rect_s0_valid;
+logic[PWIDTH-1:0] r_rect_s0_x;
+logic[PWIDTH-1:0] r_rect_s0_y;
 always_ff @(posedge clk) begin
     if (!rstn) begin
-        r_rect_x <= '0;
-        r_rect_y <= '0;
-        r_rect_x_last <= '0;
-        r_rect_y_last <= '0;
+        r_rect_s0_valid <= '0;
+        r_rect_s0_x <= '0;
+        r_rect_s0_y <= '0;
+        r_rect_s0_x_last <= '0;
+        r_rect_s0_y_last <= '0;
     end else if (r_state == RECT_INIT) begin
-        r_rect_x <= '0;
-        r_rect_y <= '0;
-        r_rect_x_last <= (ctl_rect_width == 'd1);
-        r_rect_y_last <= (ctl_rect_height == 'd1);
+        r_rect_s0_valid <= '1;
+        r_rect_s0_x <= '0;
+        r_rect_s0_y <= '0;
+        r_rect_s0_x_last <= (ctl_rect_width == 'd1);
+        r_rect_s0_y_last <= (ctl_rect_height == 'd1);
     end else if (r_state == RECT_ACCESS && w_rect_acs_clken) begin
-        if (r_rect_x_last) begin
-            r_rect_x <= '0;
-            r_rect_y <= r_rect_y + 'd1;
-            r_rect_x_last <= (ctl_rect_width == 'd1);
-            r_rect_y_last <= (r_rect_y + 'd1 >= ctl_rect_height);
+        if (r_rect_s0_x_last && r_rect_s0_y_last) begin
+            r_rect_s0_valid <= '0;
+        end
+        if (r_rect_s0_x_last) begin
+            r_rect_s0_x <= '0;
+            r_rect_s0_y <= r_rect_s0_y + 'd1;
+            r_rect_s0_x_last <= (ctl_rect_width == 'd1);
+            r_rect_s0_y_last <= (r_rect_s0_y + 'd2 >= ctl_rect_height);
         end else begin
-            r_rect_x <= r_rect_x + 'd1;
-            r_rect_x_last <= (r_rect_x + 'd1 >= ctl_rect_width);
+            r_rect_s0_x <= r_rect_s0_x + 'd1;
+            r_rect_s0_x_last <= (r_rect_s0_x + 'd2 >= ctl_rect_width);
         end
     end
 end
 
-logic[AXI_ADDR_WIDTH-1:0] r_rect_line_addr;
-logic[AXI_ADDR_WIDTH-1:0] r_rect_axaddr;
-logic[31:0] r_rect_wdata;
-logic r_rect_arvalid;
-logic r_rect_wvalid;
+logic[AXI_ADDR_WIDTH-1:0] r_rect_s1_next_line_addr;
+logic[AXI_ADDR_WIDTH-1:0] r_rect_s1_axaddr;
+logic[31:0] r_rect_s1_wdata;
+logic r_rect_s1_arvalid;
+logic r_rect_s1_wvalid;
+logic r_rect_s1_x_last;
 always_ff @(posedge clk) begin
     if (!rstn) begin
-        r_rect_line_addr <= '0;
-        r_rect_axaddr <= '0;
-        r_rect_wdata <= '0;
-        r_rect_arvalid <= '0;
-        r_rect_wvalid <= '0;
+        r_rect_s1_next_line_addr <= '0;
+        r_rect_s1_axaddr <= '0;
+        r_rect_s1_wdata <= '0;
+        r_rect_s1_arvalid <= '0;
+        r_rect_s1_wvalid <= '0;
+        r_rect_s1_x_last <= '0;
     end else if (r_state == RECT_INIT) begin
-        r_rect_line_addr <= r_rect_addr;
-    end else if (r_state == RECT_ACCESS) begin
-        if (w_rect_acs_clken) begin
-            r_rect_wdata <= ctl_rect_value;
-            r_rect_axaddr <= r_rect_line_addr + r_rect_x * BYTES_PER_PIXEL;
-            r_rect_arvalid <= !w_cmd_flags_write;
-            r_rect_wvalid <= w_cmd_flags_write;
-            if (r_rect_x_last) begin
-                r_rect_line_addr <= r_rect_line_addr + ctl_img_stride;
+        r_rect_s1_next_line_addr <= r_rect_addr + ctl_img_stride;
+        r_rect_s1_axaddr <= r_rect_addr;
+        r_rect_s1_x_last <= '0;
+    end else if (w_rect_acs_clken) begin
+        if (r_rect_s1_arvalid && r_rect_s1_wvalid) begin
+            if (r_rect_s1_x_last) begin
+                r_rect_s1_next_line_addr <= r_rect_s1_next_line_addr + ctl_img_stride;
+                r_rect_s1_axaddr <= r_rect_s1_next_line_addr;
+            end else begin
+                r_rect_s1_axaddr <= r_rect_s1_axaddr + BYTES_PER_PIXEL;
             end
         end
-    end else begin
-        r_rect_arvalid <= '0;
-        r_rect_wvalid <= '0;
+        r_rect_s1_wdata <= ctl_rect_value;
+        r_rect_s1_arvalid <= r_rect_s0_valid & ~w_cmd_flags_write;
+        r_rect_s1_wvalid <= r_rect_s0_valid & w_cmd_flags_write;
+        r_rect_s1_x_last <= r_rect_s0_x_last;
     end
 end
 
@@ -593,8 +604,8 @@ wire[AXI_STRB_WIDTH-1:0] w_wstrb;
 wire w_wvalid;
 wire w_wready;
 
-assign w_arvalid = r_edge_arvalid | r_rect_arvalid;
-assign w_araddr = r_edge_arvalid ? r_edge_araddr : r_rect_axaddr;
+assign w_arvalid = r_edge_arvalid | r_rect_s1_arvalid;
+assign w_araddr = r_edge_arvalid ? r_edge_araddr : r_rect_s1_axaddr;
 accelbrot_com_axi_slice #(
     .DATA_WIDTH(AXI_ADDR_WIDTH)
 ) u_slice_ar (
@@ -613,8 +624,8 @@ assign wram_arburst = 2'b01; // INCR
 
 assign wram_rready = w_rready;
 
-assign w_awaddr = r_edge_wvalid ? r_edge_awaddr : r_rect_axaddr;
-assign w_awvalid = (r_edge_wvalid | r_rect_wvalid) & w_wready;
+assign w_awaddr = r_edge_wvalid ? r_edge_awaddr : r_rect_s1_axaddr;
+assign w_awvalid = (r_edge_wvalid | r_rect_s1_wvalid) & w_wready;
 accelbrot_com_axi_slice #(
     .DATA_WIDTH(AXI_ADDR_WIDTH)
 ) u_slice_aw (
@@ -631,10 +642,10 @@ assign wram_awlen = 8'd0; // Single Access
 assign wram_awsize = 3'b010; // 4 Byte
 assign wram_awburst = 2'b01; // INCR
 
-assign w_wdata = r_edge_wvalid ? r_edge_wdata : r_rect_wdata;
+assign w_wdata = r_edge_wvalid ? r_edge_wdata : r_rect_s1_wdata;
 wire[AXI_STRB_WIDTH-1:0] w_strb_lsb = 'h000f;
 assign w_wstrb = w_strb_lsb << (w_awaddr % AXI_STRB_WIDTH);
-assign w_wvalid = (r_edge_wvalid | r_rect_wvalid) & w_awready;
+assign w_wvalid = (r_edge_wvalid | r_rect_s1_wvalid) & w_awready;
 wire[AXI_STRB_WIDTH-1:0] w_wram_wstrb;
 wire[31:0] w_wram_wdata;
 wire w_wram_wvalid;
@@ -658,10 +669,11 @@ assign wram_wlast = '1;
 assign w_edge_raddr_clken = w_arready | ~r_edge_arvalid;
 
 assign w_edge_wr_clken = (w_awready & w_wready) | ~r_edge_wvalid;
+assign w_edge_wr_acpt = (w_awready & w_wready) & r_edge_wvalid;
 assign w_rect_acs_clken = 
     w_cmd_flags_write ?
-    ((w_awready & w_wready) | ~r_rect_wvalid) :
-    (w_arready | ~r_rect_arvalid);
+    ((w_awready & w_wready) | ~r_rect_s1_wvalid) :
+    (w_arready | ~r_rect_s1_arvalid);
 
 assign wram_bready = '1;
 
@@ -695,23 +707,25 @@ always @(posedge clk) begin
         r_read_outstanding <= '0;
         r_read_busy <= '0;
         r_read_index <= '0;
+    end else if (r_state == IDLE) begin
+        r_read_outstanding <= '0;
+        r_read_busy <= '0;
+        r_read_index <= '0;
     end else begin
         if (w_aracpt && !w_racpt) begin
             r_read_outstanding <= r_read_outstanding + 'd1;
+            r_read_busy <= '1;
         end else if (!w_aracpt && w_racpt) begin
             r_read_outstanding <= r_read_outstanding - 'd1;
+            r_read_busy <= (r_read_outstanding > 'd1);
         end
-        r_read_busy <= r_read_outstanding > '0;
-        
-        if (r_state == IDLE) begin
-            r_read_index <= '0;
-        end else if (w_racpt) begin
+        if (w_racpt) begin
             r_read_index <= r_read_index + 'd1;
         end
     end
 end
 
-wire w_rdque_wr_en = w_cmd_flags_rdque_ena & r_edge_wvalid;
+wire w_rdque_wr_en = w_cmd_flags_rdque_ena & w_edge_wr_acpt;
 
 logic[BUFF_ADDR_WIDTH-1:0] r_rdque_wrptr;
 always @(posedge clk) begin
@@ -727,8 +741,10 @@ always @(posedge clk) begin
         v_free = ctl_rdque_rdptr - r_rdque_wrptr - 'd1;
         v_afull = (v_free < 16) ? '1 : '0;
         if (w_rdque_wr_en) begin
+`ifdef ACCELBROT_SIM
             if (v_free == 2) $display("*WARNING: Queue Full");
             if (v_free < 2) $display("*FATAL: Queue Overflow");
+`endif
             r_rdque_wrptr <= r_rdque_wrptr + 'd2;
         end
         r_rdque_afull <= v_afull;
@@ -820,10 +836,10 @@ always_ff @(posedge clk) begin
         r_sts_axi_state <= '0;
         r_sts_axi_state[31:16] <= r_read_outstanding;
         r_sts_axi_state[ 0] <= r_edge_arvalid;
-        r_sts_axi_state[ 1] <= r_rect_arvalid;
+        r_sts_axi_state[ 1] <= r_rect_s1_arvalid;
         r_sts_axi_state[ 3] <= wram_arready;
         r_sts_axi_state[ 4] <= r_edge_wvalid;
-        r_sts_axi_state[ 5] <= r_rect_wvalid;
+        r_sts_axi_state[ 5] <= r_rect_s1_wvalid;
         r_sts_axi_state[ 7] <= wram_awready;
         r_sts_axi_state[11] <= wram_wready;
     end
@@ -843,8 +859,8 @@ always @(posedge clk) begin
         r_push_y <= w_edge_write_y;
         r_push_valid <= (r_edge_trig != '0);
     end else if (r_state == RECT_ACCESS && w_rect_acs_clken) begin
-        r_push_x <= ctl_rect_x + r_rect_x;
-        r_push_y <= ctl_rect_y + r_rect_y;
+        r_push_x <= ctl_rect_x + r_rect_s0_x;
+        r_push_y <= ctl_rect_y + r_rect_s0_y;
         r_push_valid <= ctl_cmd_flags[CMD_FLAG_PUSH_TASK];
     end else begin
         r_push_valid <= '0;
@@ -853,6 +869,14 @@ end
 assign push_x = r_push_x;
 assign push_y = r_push_y;
 assign push_valid = r_push_valid;
+
+`ifdef ACCELBROT_SIM
+always @(posedge clk) begin
+    if (rstn && r_push_valid && (r_push_x >= ctl_img_width || r_push_y >= ctl_img_height)) begin
+        $display("*ERROR: Invalid push coord: x=%1d, y=%1d", r_push_x, r_push_y);
+    end
+end
+`endif
 
 // iteration counter
 logic[CWIDTH-1:0] r_sts_max_iter;

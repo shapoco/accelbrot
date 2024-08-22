@@ -500,6 +500,10 @@ initial begin
     scan_rect(0  , 1  , 1, H-2, scan_value, scan_flags);
     scan_rect(W-1, 1  , 1, H-2, scan_value, scan_flags);
 
+    $display("----------------------------------------------------------------");
+    dump_from_dram();
+    $display("----------------------------------------------------------------");
+    
     if (USE_READ_QUEUE) reg_wr(CTL_CMD_FLAGS, 32'd1 << CMD_FLAG_RDQUE_ENA);
     reg_wr(CTL_COMMAND, CMD_EDGE_SCAN);
     show_state();

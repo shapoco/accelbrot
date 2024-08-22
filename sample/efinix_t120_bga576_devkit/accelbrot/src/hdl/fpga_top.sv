@@ -247,6 +247,23 @@ axi2paxi #(
 assign ddr0_axi1_aid = '0;
 assign ddr0_axi1_alock = '0;
 
+localparam int PERIOD_1MS = SYS_CLK_FREQ / 1000;
+
+logic[31:0] r_timer_1ms;
+logic       r_pulse_1ms;
+always @(posedge axi_clk) begin
+    if (!axi_rstn) begin
+        r_timer_1ms <= 'd0;
+        r_pulse_1ms <= '0;
+    end else if (r_timer_1ms < PERIOD_1MS - 'd1) begin
+        r_timer_1ms <= r_timer_1ms + 'd1;
+        r_pulse_1ms <= '0;
+    end else begin
+        r_timer_1ms <= 'd0;
+        r_pulse_1ms <= '1;
+    end
+end
+
 function[7:0] f_log2(input logic[31:0] val);
     for (int i = 31; i >= 0; i--) begin
         if (val[i]) return i;
@@ -269,19 +286,19 @@ always @(posedge axi_clk) begin
         r_led_act <= '0;
         r_led_rdque_full <= '0; 
     end else begin
+        r_led_busy <= w_mon_busy;
         r_act_clog2 <= f_log2(w_mon_num_active);
         r_act_blink_period_ms <= 128 * r_act_clog2 + 'd128;
         if (!w_mon_busy) begin
             r_act_blink_cntr <= '0;
-            r_led_busy <= '0;
             r_led_act <= '0;
-        end else if (r_act_blink_cntr < r_act_blink_period_ms - 1) begin
-            r_act_blink_cntr <= r_act_blink_cntr + 'd1;
-            r_led_busy <= '1;
-        end else begin
-            r_act_blink_cntr <= '0;
-            r_led_busy <= '1;
-            r_led_act <= ~r_led_act;
+        end else if (r_pulse_1ms) begin
+            if (r_act_blink_cntr < r_act_blink_period_ms - 'd1) begin
+                r_act_blink_cntr <= r_act_blink_cntr + 'd1;
+            end else begin
+                r_act_blink_cntr <= '0;
+                r_led_act <= ~r_led_act;
+            end
         end
         r_led_rdque_full <= w_mon_rdque_full;
     end
@@ -289,23 +306,6 @@ end
 assign led[0] = r_led_busy;
 assign led[1] = r_led_act;
 assign led[2] = r_led_rdque_full;
-
-localparam int PERIOD_1MS = SYS_CLK_FREQ / 1000;
-
-logic[31:0] r_timer_1ms;
-logic       r_pulse_1ms;
-always @(posedge axi_clk) begin
-    if (!axi_rstn) begin
-        r_timer_1ms <= 'd0;
-        r_pulse_1ms <= '0;
-    end else if (r_timer_1ms < PERIOD_1MS - 'd1) begin
-        r_timer_1ms <= r_timer_1ms + 'd1;
-        r_pulse_1ms <= '0;
-    end else begin
-        r_timer_1ms <= 'd0;
-        r_pulse_1ms <= '1;
-    end
-end
 
 act_led u_led_loop_enter(
     .clk        (axi_clk            ), // input

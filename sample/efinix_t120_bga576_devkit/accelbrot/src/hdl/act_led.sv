@@ -8,6 +8,8 @@ module act_led(
     output  wire    led_out
 );
 
+localparam int BLINK_INTERVAL_HALF_MS = 50;
+
 logic[7:0] r_timer;
 logic[1:0] r_blink;
 
@@ -23,7 +25,7 @@ always @(posedge clk) begin
         if (act_in) begin
             if (v_blink == 'd0) begin
                 v_blink = 'd1;
-                v_timer = 'd99;
+                v_timer = BLINK_INTERVAL_HALF_MS - 'd1;
             end else if (v_blink == 'd1) begin
                 v_blink = 'd3;
             end
@@ -32,7 +34,7 @@ always @(posedge clk) begin
             if (v_timer > 'd0) begin
                 v_timer--;
             end else if (v_blink > 'd0) begin
-                v_timer = 'd99;
+                v_timer = BLINK_INTERVAL_HALF_MS - 'd1;
                 v_blink--;
             end
         end
