@@ -10,7 +10,7 @@ module accelbrot_fsm #(
     parameter int QDEPTH = 16 * 1024,
     parameter int AXI_ADDR_WIDTH = 32,
     parameter int AXI_DATA_WIDTH = 128,
-    parameter int BUFF_ADDR_WIDTH = 15,
+    parameter int BUFF_ADDR_WIDTH = 13,
     parameter int AXI_STRB_WIDTH = AXI_DATA_WIDTH / 8,
     parameter int BWIDTH = NWORDS * WWIDTH,
     parameter int TWIDTH = PWIDTH * 2

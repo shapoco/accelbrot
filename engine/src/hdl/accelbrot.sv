@@ -13,7 +13,7 @@ module accelbrot #(
     parameter int AXI_STRB_WIDTH = AXI_DATA_WIDTH / 8,
     parameter int BWIDTH = NWORDS * WWIDTH,
     parameter int TWIDTH = PWIDTH * 2,
-    parameter int BUFF_ADDR_WIDTH = 15
+    parameter int BUFF_ADDR_WIDTH = 13
 ) (
     input   wire                    clk                 ,
     input   wire                    rstn                ,

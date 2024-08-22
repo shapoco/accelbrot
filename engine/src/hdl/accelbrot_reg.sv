@@ -8,7 +8,7 @@ module accelbrot_reg #(
     parameter int CWIDTH = 20,
     parameter int PWIDTH = 12,
     parameter int AXI_ADDR_WIDTH = 32,
-    parameter int BUFF_ADDR_WIDTH = 15,
+    parameter int BUFF_ADDR_WIDTH = 13,
     parameter int BWIDTH = NWORDS * WWIDTH
 ) (
     input   wire                        clk                 ,
