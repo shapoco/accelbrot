@@ -725,7 +725,7 @@ always @(posedge clk) begin
     end
 end
 
-wire w_rdque_wr_en = w_cmd_flags_rdque_ena & w_edge_wr_acpt;
+wire w_rdque_wr_en = w_cmd_flags_rdque_ena & w_edge_wr_acpt & r_edge_wlast;
 
 logic[BUFF_ADDR_WIDTH-1:0] r_rdque_wrptr;
 always @(posedge clk) begin
