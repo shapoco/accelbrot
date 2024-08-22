@@ -576,7 +576,7 @@ always_ff @(posedge clk) begin
         r_rect_s1_axaddr <= r_rect_addr;
         r_rect_s1_x_last <= '0;
     end else if (w_rect_acs_clken) begin
-        if (r_rect_s1_arvalid && r_rect_s1_wvalid) begin
+        if (r_rect_s1_arvalid || r_rect_s1_wvalid) begin
             if (r_rect_s1_x_last) begin
                 r_rect_s1_next_line_addr <= r_rect_s1_next_line_addr + ctl_img_stride;
                 r_rect_s1_axaddr <= r_rect_s1_next_line_addr;
@@ -813,20 +813,25 @@ accelbrot_com_ram_sdp #(
     .rd_addr(w_rbuff_rd_addr    ), // input [ADDR_WIDTH-1:0]
     .rd_data(w_rbuff_rd_data_h  )  // output[DATA_WIDTH-1:0]
 );
-assign buff_rd_data = buff_addr[0] == 1'b0 ? w_rbuff_rd_data_l : w_rbuff_rd_data_h;
-
 logic r_buff_rd_en;
 logic r_buff_rd_ack;
+logic r_buff_rd_addr0_d0;
+logic r_buff_rd_addr0_d1;
 always @(posedge clk) begin
     if (!rstn) begin
         r_buff_rd_en <= '0;
         r_buff_rd_ack <= '0;
+        r_buff_rd_addr0_d0 <= '0;
+        r_buff_rd_addr0_d1 <= '0;
     end else begin
         r_buff_rd_en <= buff_rd_en;
         r_buff_rd_ack <= r_buff_rd_en;
+        r_buff_rd_addr0_d0 <= buff_addr[0];
+        r_buff_rd_addr0_d1 <= r_buff_rd_addr0_d0;
     end
 end
 assign buff_rd_ack = r_buff_rd_ack;
+assign buff_rd_data = r_buff_rd_addr0_d1 == 1'b0 ? w_rbuff_rd_data_l : w_rbuff_rd_data_h;
 
 logic[31:0] r_sts_axi_state;
 always_ff @(posedge clk) begin
