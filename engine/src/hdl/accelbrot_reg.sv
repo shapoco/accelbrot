@@ -60,7 +60,7 @@ module accelbrot_reg #(
 
 localparam int ABWIDTH = ((BWIDTH + 31) / 32) * 32;
 
-localparam[31:0] VERSION = 32'h24082100;
+localparam[31:0] VERSION = 32'h24082200;
 localparam[31:0] PRSEED = 32'h00000006;
 
 localparam[15:0] PRM_VERSION        = 16'h0000;
