@@ -14,6 +14,7 @@ module accelbrot_loop #(
     output  wire[31:0]      sts_num_running ,
     output  wire[31:0]      sts_num_exited  ,
     input   wire[CWIDTH-1:0]ctl_max_iter    ,
+    input   wire            ctl_burn_ship   ,
     input   wire[WWIDTH-1:0]enter_a         ,
     input   wire[WWIDTH-1:0]enter_b         ,
     input   wire[TWIDTH-1:0]enter_tag       ,
@@ -100,6 +101,7 @@ generate
             .clk            (clk                ), // input
             .rstn           (rstn               ), // input
             .ctl_max_iter   (ctl_max_iter       ), // input [CWIDTH-1:0]
+            .ctl_burn_ship  (ctl_burn_ship      ), // input
             .in_x           (w_iter_x      [i]  ), // input [WWIDTH-1:0]
             .in_y           (w_iter_y      [i]  ), // input [WWIDTH-1:0]
             .in_a           (w_iter_a      [i]  ), // input [WWIDTH-1:0]

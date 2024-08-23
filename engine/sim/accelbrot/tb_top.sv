@@ -63,6 +63,7 @@ localparam[15:0] CTL_A_STEP_Y       = 16'h0514; // resereved
 localparam[15:0] CTL_B_STEP_X       = 16'h0518; // resereved
 localparam[15:0] CTL_B_STEP_Y       = 16'h051C;
 localparam[15:0] CTL_MAX_ITER       = 16'h0540;
+localparam[15:0] CTL_BURN_SHIP      = 16'h0550;
 localparam[15:0] CTL_RECT_X         = 16'h0600;
 localparam[15:0] CTL_RECT_Y         = 16'h0604;
 localparam[15:0] CTL_RECT_WIDTH     = 16'h0608;
@@ -484,7 +485,8 @@ initial begin
     write_param(CTL_A_STEP_X, RANGE / W);
     write_param(CTL_B_STEP_Y, RANGE / W * 2);
 
-    reg_wr(CTL_MAX_ITER  , 16);
+    reg_wr(CTL_MAX_ITER, 16);
+    reg_wr(CTL_BURN_SHIP, 0);
     
     reg_wr(CTL_COMMAND, CMD_RESET_CNTR);
     if (USE_READ_QUEUE) clear_pop_buff();

@@ -10,6 +10,7 @@ module accelbrot_loop_core #(
     input   wire            clk             ,
     input   wire            rstn            ,
     input   wire[CWIDTH-1:0]ctl_max_iter    ,
+    input   wire            ctl_burn_ship   ,
     input   wire[WWIDTH-1:0]in_x            ,
     input   wire[WWIDTH-1:0]in_y            ,
     input   wire[WWIDTH-1:0]in_a            ,
@@ -37,6 +38,15 @@ localparam int W2B_LATENCY = NWORDS;
 localparam int MULT_LATENCY = NWORDS + 5;
 localparam int NEG_LATENCY = 1;
 localparam int ADD_SUB_LATENCY = 1;
+
+logic r_burn_ship;
+always_ff @(posedge clk) begin
+    if (!rstn) begin
+        r_burn_ship <= '0;
+    end else if (in_start) begin
+        r_burn_ship <= ctl_burn_ship;
+    end
+end
 
 wire w_s2_start;
 wire w_s2_valid;
@@ -111,7 +121,7 @@ wire w_s4_start;
 wire w_s4_valid;
 
 // x^2
-wire[WWIDTH-1:0] w_s4_xx_abs;
+wire[WWIDTH-1:0] w_s4_xx;
 accelbrot_com_mult_unxn #(
     .NWORDS(NWORDS),
     .WWIDTH(WWIDTH),
@@ -122,7 +132,7 @@ accelbrot_com_mult_unxn #(
     .a          (w_s3_x_abs ), // input [NWORDS*WWIDTH-1:0]
     .b          (w_s3_x_abs ), // input [NWORDS*WWIDTH-1:0]
     .ab_valid   (w_s3_valid ), // input
-    .q          (w_s4_xx_abs), // output[WWIDTH-1:0]
+    .q          (w_s4_xx    ), // output[WWIDTH-1:0]
     .q_start    (w_s4_start ), // output
     .q_valid    (w_s4_valid )  // output
 );
@@ -148,7 +158,7 @@ accelbrot_com_mult_unxn #(
 );
 
 // y^2
-wire[WWIDTH-1:0] w_s4_yy_abs;
+wire[WWIDTH-1:0] w_s4_yy;
 accelbrot_com_mult_unxn #(
     .NWORDS(NWORDS),
     .WWIDTH(WWIDTH),
@@ -159,7 +169,7 @@ accelbrot_com_mult_unxn #(
     .a          (w_s3_y_abs ), // input [NWORDS*WWIDTH-1:0]
     .b          (w_s3_y_abs ), // input [NWORDS*WWIDTH-1:0]
     .ab_valid   (w_s3_valid ), // input
-    .q          (w_s4_yy_abs), // output[WWIDTH-1:0]
+    .q          (w_s4_yy    ), // output[WWIDTH-1:0]
     .q_start    (/* open */ ), // output
     .q_valid    (/* open */ )  // output
 );
@@ -167,15 +177,15 @@ accelbrot_com_mult_unxn #(
 wire w_s5_start;
 wire w_s5_valid;
 
-// x^2 - y^y
+// x^2 - y^2
 wire[WWIDTH-1:0] w_s5_sub_xx_yy;
 accelbrot_com_sub #(
     .WWIDTH(WWIDTH)
 ) u_sub_xx_yy (
     .clk        (clk            ), // input
     .rstn       (rstn           ), // input
-    .a          (w_s4_xx_abs    ), // input [WWIDTH-1:0]
-    .b          (w_s4_yy_abs    ), // input [WWIDTH-1:0]
+    .a          (w_s4_xx        ), // input [WWIDTH-1:0]
+    .b          (w_s4_yy        ), // input [WWIDTH-1:0]
     .ab_start   (w_s4_start     ), // input
     .ab_valid   (w_s4_valid     ), // input
     .q          (w_s5_sub_xx_yy ), // output[WWIDTH-1:0]
@@ -183,15 +193,15 @@ accelbrot_com_sub #(
     .q_valid    (w_s5_valid     )  // output
 );
 
-// x^2 + y^y
+// x^2 + y^2
 wire[WWIDTH-1:0] w_s5_add_xx_yy;
 accelbrot_com_add #(
     .WWIDTH(WWIDTH)
 ) u_add_xx_yy (
     .clk        (clk            ), // input
     .rstn       (rstn           ), // input
-    .a          (w_s4_xx_abs    ), // input [WWIDTH-1:0]
-    .b          (w_s4_yy_abs    ), // input [WWIDTH-1:0]
+    .a          (w_s4_xx        ), // input [WWIDTH-1:0]
+    .b          (w_s4_yy        ), // input [WWIDTH-1:0]
     .ab_start   (w_s4_start     ), // input
     .ab_valid   (w_s4_valid     ), // input
     .q          (w_s5_add_xx_yy ), // output[WWIDTH-1:0]
@@ -215,18 +225,18 @@ accelbrot_com_delay #(
 accelbrot_com_add #(
     .WWIDTH(WWIDTH)
 ) u_add_a (
-    .clk        (clk        ), // input
-    .rstn       (rstn       ), // input
+    .clk        (clk            ), // input
+    .rstn       (rstn           ), // input
     .a          (w_s5_sub_xx_yy ), // input [WWIDTH-1:0]
-    .b          (w_s5_a     ), // input [WWIDTH-1:0]
-    .ab_start   (w_s5_start ), // input
-    .ab_valid   (w_s5_valid ), // input
-    .q          (out_x      ), // output[WWIDTH-1:0]
-    .q_start    (out_start  ), // output
-    .q_valid    (out_valid  )  // output
+    .b          (w_s5_a         ), // input [WWIDTH-1:0]
+    .ab_start   (w_s5_start     ), // input
+    .ab_valid   (w_s5_valid     ), // input
+    .q          (out_x          ), // output[WWIDTH-1:0]
+    .q_start    (out_start      ), // output
+    .q_valid    (out_valid      )  // output
 );
 
-wire w_s2_xy_sign = w_s2_x_sign ^ w_s2_y_sign;
+wire w_s2_xy_sign = r_burn_ship ? '0 : (w_s2_x_sign ^ w_s2_y_sign);
 wire w_s4_xy_sign;
 accelbrot_com_delay #(
     .DEPTH(MULT_LATENCY),

@@ -105,6 +105,7 @@ wire[BWIDTH-1:0]            w_ctl_b_offset  ;
 wire[BWIDTH-1:0]            w_ctl_a_step_x  ;
 wire[BWIDTH-1:0]            w_ctl_b_step_y  ;
 wire[CWIDTH-1:0]            w_ctl_max_iter  ;
+wire                        w_ctl_burn_ship ;
 wire[AXI_ADDR_WIDTH-1:0]    w_ctl_img_addr  ;
 wire[PWIDTH-1:0]            w_ctl_img_width ;
 wire[PWIDTH-1:0]            w_ctl_img_height;
@@ -165,6 +166,7 @@ accelbrot_reg #(
     .ctl_a_step_x       (w_ctl_a_step_x     ), // output[BWIDTH-1:0]
     .ctl_b_step_y       (w_ctl_b_step_y     ), // output[BWIDTH-1:0]
     .ctl_max_iter       (w_ctl_max_iter     ), // output[CWIDTH-1:0]
+    .ctl_burn_ship      (w_ctl_burn_ship    ), // output
     .ctl_rect_x         (w_ctl_rect_x       ), // output[PWIDTH-1:0]
     .ctl_rect_y         (w_ctl_rect_y       ), // output[PWIDTH-1:0]
     .ctl_rect_width     (w_ctl_rect_width   ), // output[PWIDTH-1:0]
@@ -324,6 +326,7 @@ accelbrot_loop #(
     .sts_num_running(w_sts_num_running  ), // output[31:0]
     .sts_num_exited (w_sts_num_exited   ), // output[31:0]
     .ctl_max_iter   (w_ctl_max_iter     ), // input [CWIDTH-1:0]
+    .ctl_burn_ship  (w_ctl_burn_ship    ), // input
     .enter_a        (w_enter_a          ), // input [WWIDTH-1:0]
     .enter_b        (w_enter_b          ), // input [WWIDTH-1:0]
     .enter_tag      (w_enter_tag        ), // input [TWIDTH-1:0]

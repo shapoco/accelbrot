@@ -34,6 +34,7 @@ module accelbrot_reg #(
     input   wire[7:0]                   sts_wram_wrbytes    ,
     input   wire[7:0]                   sts_wram_rdbytes    ,
     output  wire[7:0]                   ctl_command         ,
+    output  wire                        ctl_burn_ship       ,
     output  wire                        ctl_soft_reset      ,
     output  wire[AXI_ADDR_WIDTH-1:0]    ctl_img_addr        ,
     output  wire[PWIDTH-1:0]            ctl_img_width       ,
@@ -60,7 +61,7 @@ module accelbrot_reg #(
 
 localparam int ABWIDTH = ((BWIDTH + 31) / 32) * 32;
 
-localparam[31:0] VERSION = 32'h24082200;
+localparam[31:0] VERSION = 32'h24082300;
 localparam[31:0] PRSEED = 32'h00000006;
 
 localparam[15:0] PRM_VERSION        = 16'h0000;
@@ -106,6 +107,7 @@ localparam[15:0] CTL_A_STEP_Y       = 16'h0514; // resereved
 localparam[15:0] CTL_B_STEP_X       = 16'h0518; // resereved
 localparam[15:0] CTL_B_STEP_Y       = 16'h051C;
 localparam[15:0] CTL_MAX_ITER       = 16'h0540;
+localparam[15:0] CTL_BURN_SHIP      = 16'h0550;
 localparam[15:0] CTL_RECT_X         = 16'h0600;
 localparam[15:0] CTL_RECT_Y         = 16'h0604;
 localparam[15:0] CTL_RECT_WIDTH     = 16'h0608;
@@ -143,6 +145,7 @@ logic[ABWIDTH-1:0]          r_ctl_b_offset      ;
 logic[ABWIDTH-1:0]          r_ctl_a_step_x      ;
 logic[ABWIDTH-1:0]          r_ctl_b_step_y      ;
 logic[CWIDTH-1:0]           r_ctl_max_iter      ;
+logic                       r_ctl_burn_ship     ;
 logic[PWIDTH-1:0]           r_ctl_rect_x        ;
 logic[PWIDTH-1:0]           r_ctl_rect_y        ;
 logic[PWIDTH-1:0]           r_ctl_rect_width    ;
@@ -162,6 +165,7 @@ assign ctl_b_offset     = r_ctl_b_offset    ;
 assign ctl_a_step_x     = r_ctl_a_step_x    ;
 assign ctl_b_step_y     = r_ctl_b_step_y    ;
 assign ctl_max_iter     = r_ctl_max_iter    ;
+assign ctl_burn_ship    = r_ctl_burn_ship   ;
 assign ctl_rect_x       = r_ctl_rect_x      ;
 assign ctl_rect_y       = r_ctl_rect_y      ;
 assign ctl_rect_width   = r_ctl_rect_width  ;
@@ -275,6 +279,7 @@ always_ff @(posedge clk) begin
         r_ctl_a_step_x      <= '0;
         r_ctl_b_step_y      <= '0;
         r_ctl_max_iter      <= '0;
+        r_ctl_burn_ship     <= '0;
         r_ctl_rect_x        <= '0;
         r_ctl_rect_y        <= '0;
         r_ctl_rect_width    <= '0;
@@ -295,6 +300,7 @@ always_ff @(posedge clk) begin
             CTL_A_STEP_X    : r_ctl_a_step_x    <= {r_wr_data, r_ctl_a_step_x[ABWIDTH-1:32]};
             CTL_B_STEP_Y    : r_ctl_b_step_y    <= {r_wr_data, r_ctl_b_step_y[ABWIDTH-1:32]};
             CTL_MAX_ITER    : r_ctl_max_iter    <= r_wr_data;
+            CTL_BURN_SHIP   : r_ctl_burn_ship   <= r_wr_data;
             CTL_RECT_X      : r_ctl_rect_x      <= r_wr_data;
             CTL_RECT_Y      : r_ctl_rect_y      <= r_wr_data;
             CTL_RECT_WIDTH  : r_ctl_rect_width  <= r_wr_data;
