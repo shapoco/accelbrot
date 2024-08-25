@@ -43,7 +43,7 @@ logic r_burn_ship;
 always_ff @(posedge clk) begin
     if (!rstn) begin
         r_burn_ship <= '0;
-    end else if (in_start) begin
+    end else begin
         r_burn_ship <= ctl_burn_ship;
     end
 end

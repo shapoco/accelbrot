@@ -130,6 +130,7 @@ accelbrot_reg #(
     .IWIDTH         (IWIDTH         ),
     .CWIDTH         (CWIDTH         ),
     .PWIDTH         (PWIDTH         ),
+    .QDEPTH         (QDEPTH         ),
     .AXI_ADDR_WIDTH (AXI_ADDR_WIDTH ),
     .BUFF_ADDR_WIDTH(BUFF_ADDR_WIDTH)
 ) u_reg (

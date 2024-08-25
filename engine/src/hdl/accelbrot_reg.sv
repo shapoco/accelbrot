@@ -7,6 +7,7 @@ module accelbrot_reg #(
     parameter int WWIDTH = 34,
     parameter int CWIDTH = 20,
     parameter int PWIDTH = 12,
+    parameter int QDEPTH = 16 * 1024,
     parameter int AXI_ADDR_WIDTH = 32,
     parameter int BUFF_ADDR_WIDTH = 13,
     parameter int BWIDTH = NWORDS * WWIDTH
@@ -71,6 +72,7 @@ localparam[15:0] PRM_NWORDS         = 16'h0014;
 localparam[15:0] PRM_WWIDTH         = 16'h0018;
 localparam[15:0] PRM_IWIDTH         = 16'h001C;
 localparam[15:0] PRM_CWIDTH         = 16'h0020;
+localparam[15:0] PRM_QDEPTH         = 16'h0024;
 localparam[15:0] PRM_BUFF_BASE      = 16'h00c0;
 localparam[15:0] PRM_BUFF_SIZE     = 16'h00c8;
 
@@ -330,6 +332,7 @@ always_ff @(posedge clk) begin
         PRM_WWIDTH      : r_rd_data <= WWIDTH;
         PRM_IWIDTH      : r_rd_data <= IWIDTH;
         PRM_CWIDTH      : r_rd_data <= CWIDTH;
+        PRM_QDEPTH      : r_rd_data <= QDEPTH;
         PRM_BUFF_BASE   : r_rd_data <= BUFF_BASE;
         PRM_BUFF_SIZE   : r_rd_data <= 32'd4 << BUFF_ADDR_WIDTH;
         STS_BUSY        : r_rd_data <= sts_busy;
@@ -359,6 +362,7 @@ always_ff @(posedge clk) begin
         CTL_A_STEP_X    : r_rd_data <= r_ctl_a_step_x[ABWIDTH-1:ABWIDTH-32];
         CTL_B_STEP_Y    : r_rd_data <= r_ctl_b_step_y[ABWIDTH-1:ABWIDTH-32];
         CTL_MAX_ITER    : r_rd_data <= r_ctl_max_iter   ;
+        CTL_BURN_SHIP   : r_rd_data <= r_ctl_burn_ship  ;
         CTL_RECT_X      : r_rd_data <= r_ctl_rect_x     ;
         CTL_RECT_Y      : r_rd_data <= r_ctl_rect_y     ;
         CTL_RECT_WIDTH  : r_rd_data <= r_ctl_rect_width ;
